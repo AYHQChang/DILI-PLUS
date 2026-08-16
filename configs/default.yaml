@@ -1,0 +1,22 @@
+project_root: ..
+
+database:
+  path: D:/MedicalAI_Work/duck/medical.duckdb
+  read_only: true
+
+paths:
+  data_cache: data_cache
+  vocab: vocab
+  checkpoints: checkpoints
+  reports: reports
+  figures: figures
+  saved_models: saved_models
+  tensors: tensors
+  drug_mapping: mapping_completed_drugs_checkpoint.csv
+  drug_mapping_template: mapping_template_drugs.csv
+
+training:
+  epochs: 50
+  batch_size: 256
+  learning_rate: 0.0001
+

@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local-only operating notes
+/指令.md
+
+# Patient-derived, generated, or heavyweight artifacts
+/data_cache/
+/vocab/
+/checkpoints/
+/reports/
+/figures/
+/saved_models/
+/tensors/
+/mapping_*.csv
+
+# Safety net for data stores and serialized model artifacts
+*.duckdb
+*.parquet
+*.pth
+*.pt
+*.joblib
+*.sqlite
+*.sqlite3

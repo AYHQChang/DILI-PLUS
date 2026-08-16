@@ -7,3 +7,6 @@ from diliplus.data.diagnoses import build_diag_tensors
 
 if __name__ == "__main__":
     build_diag_tensors()
+
+
+# test

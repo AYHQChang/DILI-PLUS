@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "contract": "code10_minimum_ablation_audit_v1",
+  "status": "PASS",
+  "analysis_run_id": "code10_minimum_ablations_seed0",
+  "model_source_runs": {
+    "TimeAwareMultimodalTransformer": "code10_formal_128d4h_seed0",
+    "StaticDiagnosisOnly": "code10_minimum_ablations_seed0",
+    "MedicationOnly": "code10_minimum_ablations_seed0",
+    "LaboratoryOnly": "code10_minimum_ablations_seed0",
+    "FullWithoutTimeEncoding": "code10_minimum_ablations_seed0",
+    "FullWithoutDiagnosis": "code10_minimum_ablations_seed0"
+  },
+  "recorded_runs": {
+    "code10_formal_128d4h_seed0": {
+      "git_commit": "22b4b59d95420fd8fbc0c669d1fa95fc01269246",
+      "duration_seconds": 2614.506618,
+      "log_sha256": "2FA3FB76C192B821ACD4DE3712134FF9445DFF406BD233B7794BB6D58CD26C3F"
+    },
+    "code10_minimum_ablations_seed0": {
+      "git_commit": "283302d210983def4f8ef2e8d55033b5c958d8cb",
+      "duration_seconds": 3277.175649,
+      "log_sha256": "F9E5E97D60E9DC1BAC09ECBD6AE6335224B91DAE8023741C0275293D16B1CCC2"
+    }
+  },
+  "models": [
+    "TimeAwareMultimodalTransformer",
+    "StaticDiagnosisOnly",
+    "MedicationOnly",
+    "LaboratoryOnly",
+    "FullWithoutTimeEncoding",
+    "FullWithoutDiagnosis"
+  ],
+  "outer_folds": 5,
+  "oof_rows_per_model": {
+    "TimeAwareMultimodalTransformer": 44631,
+    "StaticDiagnosisOnly": 44631,
+    "MedicationOnly": 44631,
+    "LaboratoryOnly": 44631,
+    "FullWithoutTimeEncoding": 44631,
+    "FullWithoutDiagnosis": 44631
+  },
+  "oof_positive": 315,
+  "unique_patient_clusters": 44611,
+  "artifacts_and_sidecars_verified": 30,
+  "maximum_saved_probability_absolute_error": 8.53081831841962e-08,
+  "fold_level_ranking_invariance": {
+    "status": "PASS",
+    "absolute_tolerance": 1e-05,
+    "max_absolute_difference": {
+      "AUROC": 8.954651851134088e-07,
+      "AUPRC": 5.551115123125783e-17
+    }
+  },
+  "aggregate_table_rows": {
+    "pooled_metrics": 12,
+    "bootstrap_intervals": 48,
+    "paired_comparisons": 40,
+    "resource_usage": 30
+  },
+  "analysis_manifest_sha256": "C9DCCD549B503B391456CC56F82FE191DDFCAD7C865EF7DFBB4FF7644A5501DB",
+  "privacy": "aggregate counts and hashes only; no identifiers",
+  "payload_sha256": "7330E004FAFFF431F09CD43C0B263E33BA84F1BBC7595595800C5A2CDF7FAC2A"
+}

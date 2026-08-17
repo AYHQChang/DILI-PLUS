@@ -1288,5 +1288,31 @@ primary-minus-TextCNN 的 AUPRC 差值在三个 seed 分别为 -0.01857、+0.002
 `code10_seed_stability_summary_vscode` 因预测 fold 文件名匹配错误在读取阶段失败（2.17 s），
 没有改动训练 artifact 或产生统计结果，失败记录保留。详细本地 CSV 位于
 `reports/runs/code10_seed_stability_summary/`，可提交 aggregate-only 证据见
-`manifests/code10_seed_stability.json`。下一步是 Code-09 最低消融性能与 24/48/72 h
-early-warning 性能；完成前不得重建最终 Table 2/Figure 2--4 或同步论文结论。
+`manifests/code10_seed_stability.json`。随后最低消融见第21.5节；24/48/72 h early-warning
+完成前不得重建最终 Table 2/Figure 2--4 或同步论文结论。
+
+### 21.5 最低消融正式性能
+
+`code10_minimum_ablations_seed0` 从 clean commit `283302d` 启动并 **PASS**，耗时
+3,277.18 s（54.62 min）。它只训练五个 ablation-only 模型（25 folds），并显式复用
+`code10_formal_128d4h_seed0` 的 full primary；cross-run manifest 逐模型保存来源 run 和训练
+commit。30/30 来源 artifact/sidecar、相同 44,631 OOF rows/315 positives/44,611 patient
+clusters、logits/temperature 概率（最大误差 `8.53e-8`）及 aggregate 表形状均通过
+`code10_minimum_ablations_audit_vscode` 审计。
+
+| Model | Calibrated AUROC (95% CI) | Calibrated AUPRC (95% CI) | Brier | NLL |
+|---|---:|---:|---:|---:|
+| Full primary | 0.8480 (0.8260--0.8694) | 0.0678 (0.0537--0.0896) | 0.00814 | 0.03932 |
+| Static diagnosis-only | 0.5876 (0.5557--0.6202) | 0.0099 (0.0084--0.0123) | 0.00849 | 0.05451 |
+| Medication-only | 0.8561 (0.8315--0.8790) | **0.0950** (0.0728--0.1287) | **0.00730** | **0.03660** |
+| Laboratory-only | 0.8081 (0.7815--0.8353) | 0.0535 (0.0424--0.0705) | 0.00731 | 0.03789 |
+| Full without time encoding | 0.8442 (0.8219--0.8663) | 0.0658 (0.0510--0.0890) | 0.00796 | 0.03881 |
+| Full without diagnosis | 0.8502 (0.8267--0.8722) | 0.0815 (0.0631--0.1098) | 0.00750 | 0.03690 |
+
+Medication-only 的 AUPRC 高于 full primary：primary-minus-ablation 为 -0.0272（95% CI
+-0.0523 至 -0.0109，Holm-adjusted `p=0.03996`），Brier/NLL 也显著更低。移除时间编码的
+AUPRC 差值仅 +0.0020（CI跨0，Holm `p=1`），不支持连续时间编码有可检测的增量价值。移除
+诊断后的 AUPRC 方向上更高但不显著；Brier 与 NLL 则显著优于 full primary（Holm
+`p=0.03996`）。因此当前证据不支持“多模态融合和时间编码共同驱动性能提升”的旧稿主张；
+更准确的结论是药物流承担主要预测信号，而加入化验/诊断/时间模块未表现出稳定增益。下一步
+只剩 24/48/72 h early-warning 正式性能，完成前不生成最终 Figure 4。

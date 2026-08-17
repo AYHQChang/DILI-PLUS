@@ -310,6 +310,14 @@ primary 的 AUPRC 显著低于 Logistic Regression 和 XGBoost，Brier/NLL 也�
 `manifests/code10_architecture_sensitivity.json` 和 `manifests/code10_seed_stability.json`；论文
 Table 2/Figure 2/3 尚未由这些新结果重建。
 
+最低消融正式运行 `code10_minimum_ablations_seed0` 另训练五个 ablation-only 模型，并复用
+主 run 的 full primary；30/30 来源 artifacts、相同 44,631 条 OOF membership 和保存概率均
+通过审计。Medication-only 的 AUPRC 为0.0950，显著高于 full primary 0.0678（primary-minus-
+medication-only -0.0272，95% CI -0.0523至-0.0109，Holm `p=0.03996`）。移除时间编码后
+AUPRC 0.0658，与 full primary 差值接近0且不显著；移除诊断后 AUPRC 0.0815，差异不显著，
+但 Brier/NLL 显著更低。结果不支持时间编码或诊断模态带来稳定增量价值，论文必须据此收缩
+架构创新主张。证据见 `manifests/code10_minimum_ablations_seed0_run.json` 和审计 manifest。
+
 ## 7. 论文章节—代码映射
 
 本节同时保留旧稿主张的审计轨迹。凡引用 51,316/507、TA-MedBERT、旧性能 CSV 或旧 Figure
@@ -548,7 +556,7 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 ## 15. 当前建议的大修顺序
 
 1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split、版本化 artifact，以及 Code-07 模型/损失语义合同。
-2. Code-08 cohort/Table 1、Code-09 输入/消融合同、Code-10 六模型主运行、128/8敏感性和三 seed 稳定性均已完成；下一步执行最低消融和24/48/72 h early-warning 性能。
+2. Code-08 cohort/Table 1、Code-09 输入合同、Code-10 六模型主运行、128/8敏感性、三 seed 稳定性和最低消融均已完成；下一步执行24/48/72 h early-warning 性能。
 3. 论文后续统一采用 `TimeAwareMultimodalTransformer`/TA-MMT，并只保留当前实现和新实验真正支持的创新点。
 4. 用新结果重做 Table 1、Table 2、Figure 1b/1d/2/3/4。
 5. 把 Figure 5/6 降级为单病例模型审计，并改掉因果/治疗用语。

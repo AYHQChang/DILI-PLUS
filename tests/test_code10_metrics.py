@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -14,6 +15,10 @@ from diliplus.evaluation.metrics import (
     cluster_bootstrap_intervals,
     compute_binary_metrics,
     paired_cluster_bootstrap,
+)
+from diliplus.evaluation.finalize import (
+    _fold_ranking_invariance,
+    _resource_table,
 )
 
 
@@ -66,6 +71,25 @@ class Code10MetricTests(unittest.TestCase):
         adjusted = add_holm_adjustment(comparison)
         self.assertIn("p_value_holm", adjusted)
         self.assertTrue((adjusted["p_value_holm"] >= adjusted["p_value_two_sided"]).all())
+
+    def test_fold_ranking_invariance_and_resource_rows_are_not_double_counted(self):
+        frame = pd.DataFrame(
+            {
+                "Model_Architecture": ["M", "M"],
+                "Fold": [1, 1],
+                "Probability_Mode": ["raw", "calibrated"],
+                "AUROC": [0.8, 0.8 + 1e-8],
+                "AUPRC": [0.2, 0.2],
+                "Selected_Epoch": [4, 4],
+                "Fold_Duration_Seconds": [12.5, 12.5],
+                "Device": ["cuda", "cuda"],
+            }
+        )
+        audit = _fold_ranking_invariance([frame])
+        self.assertEqual(audit["status"], "PASS")
+        resources = _resource_table([frame])
+        self.assertEqual(len(resources), 1)
+        self.assertEqual(float(resources.iloc[0]["Fold_Duration_Seconds"]), 12.5)
 
 
 if __name__ == "__main__":

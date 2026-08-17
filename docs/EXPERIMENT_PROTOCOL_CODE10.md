@@ -79,7 +79,9 @@ Transformer head 数为 8；它是预注册架构敏感性，不用于看过 out
 - 每个 fold 保存逐 epoch loss、selection AUPRC/AUROC、学习率和 selected epoch；
 - calibration split 拟合 temperature `T>0`；
 - 同一 test logits 生成 `softmax(logits)` 与 `softmax(logits/T)`；
-- 标量温度不改变排序；raw/calibrated AUROC/AUPRC 不一致视为实现或汇总错误；
+- 单个 model/fold 内，标量温度不改变排序；fold-level raw/calibrated AUROC/AUPRC 仅允许
+  `1e-5` 内的浮点并列差异。各折温度不同，因此 OOF 合并后跨折排序可能变化，pooled raw 与
+  calibrated discrimination 不要求相等；两者必须同时保存并明确概率模式；
 - 主六模型先完成单 seed/5-fold。确认完整性后，仅对 primary 和最强深度 comparator 追加
   3-seed 稳定性分析；“最强”按主 run 的 pooled calibrated AUPRC 定义，选择规则在读取结果前
   已写入本协议。

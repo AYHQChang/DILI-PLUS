@@ -96,6 +96,114 @@ def _common_membership(frames: dict[str, pd.DataFrame]) -> None:
             raise RuntimeError(f"OOF membership or labels differ for model {name}")
 
 
+def _training_commit(settings, run_id: str) -> str | None:
+    """Recover the clean commit captured when the recorded training began.
+
+    The recorded-run JSON is written only after the training child exits, so
+    it is absent during the original in-process finalization but available to
+    any later aggregate-only reanalysis.
+    """
+    path = settings.paths.reports / "run_logs" / f"{run_id}.json"
+    if path.exists():
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload.get("git_commit")
+    return _git("rev-parse", "HEAD")
+
+
+def _fold_metric_paths(metrics_dir: Path, model_names) -> list[Path]:
+    paths = []
+    for model_name in model_names:
+        filename = (
+            "ml_baselines.csv"
+            if model_name in {"LogisticRegression", "XGBoost"}
+            else f"{model_name}.csv"
+        )
+        path = metrics_dir / filename
+        if path not in paths:
+            paths.append(path)
+    missing = [str(path) for path in paths if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing fold metric files: {missing}")
+    return paths
+
+
+def _fold_ranking_invariance(metric_frames: list[pd.DataFrame]) -> dict:
+    frame = pd.concat(metric_frames, ignore_index=True)
+    required = {
+        "Model_Architecture",
+        "Fold",
+        "Probability_Mode",
+        "AUROC",
+        "AUPRC",
+    }
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise RuntimeError(f"Fold metrics cannot audit ranking invariance: {missing}")
+    pivot = frame.pivot(
+        index=["Model_Architecture", "Fold"],
+        columns="Probability_Mode",
+        values=["AUROC", "AUPRC"],
+    )
+    modes = set(pivot.columns.get_level_values(1))
+    if modes != {"raw", "calibrated"}:
+        raise RuntimeError(f"Expected paired raw/calibrated fold metrics, found {modes}")
+    difference = (
+        pivot.xs("raw", axis=1, level=1)
+        - pivot.xs("calibrated", axis=1, level=1)
+    ).abs()
+    maxima = {metric: float(difference[metric].max()) for metric in difference}
+    tolerance = 1e-5
+    if any(value > tolerance for value in maxima.values()):
+        raise RuntimeError(
+            "Within-fold temperature scaling changed discrimination beyond "
+            f"floating-point tolerance: {maxima}"
+        )
+    return {
+        "scope": "within each model/fold only",
+        "status": "PASS",
+        "absolute_tolerance": tolerance,
+        "max_absolute_difference": maxima,
+        "pooled_note": (
+            "Fold-specific temperatures may change cross-fold ordering after OOF "
+            "pooling; pooled raw and calibrated discrimination need not be equal."
+        ),
+    }
+
+
+def _resource_table(metric_frames: list[pd.DataFrame]) -> pd.DataFrame:
+    resource_frames = []
+    for frame in metric_frames:
+        columns = [
+            column
+            for column in (
+                "Model_Architecture",
+                "Fold",
+                "Selected_Epoch",
+                "Best_Selection_AUPRC",
+                "Parameter_Count",
+                "Feature_Count",
+                "Fold_Duration_Seconds",
+                "Peak_GPU_Memory_MB",
+                "Device",
+            )
+            if column in frame.columns
+        ]
+        resource_frames.append(frame[columns])
+    resources = pd.concat(resource_frames, ignore_index=True)
+    keys = ["Model_Architecture", "Fold"]
+    for column in (value for value in resources.columns if value not in keys):
+        conflicts = resources.groupby(keys, dropna=False)[column].nunique(dropna=False)
+        if conflicts.gt(1).any():
+            raise RuntimeError(
+                f"Raw/calibrated rows disagree on resource field {column!r}"
+            )
+    return (
+        resources.sort_values(keys, kind="stable")
+        .drop_duplicates(keys, keep="first")
+        .reset_index(drop=True)
+    )
+
+
 def finalize_formal_run(settings, run_id: str, model_names) -> dict:
     model_names = tuple(model_names)
     if PRIMARY_MODEL_NAME not in model_names:
@@ -208,30 +316,10 @@ def finalize_formal_run(settings, run_id: str, model_names) -> dict:
     for filename, frame in outputs.items():
         frame.to_csv(metrics_dir / filename, index=False)
 
-    fold_metric_paths = sorted(
-        path for path in metrics_dir.glob("*.csv") if path.name not in outputs
-    )
-    resource_frames = []
-    for path in fold_metric_paths:
-        frame = pd.read_csv(path)
-        columns = [
-            column
-            for column in (
-                "Model_Architecture",
-                "Fold",
-                "Probability_Mode",
-                "Selected_Epoch",
-                "Best_Selection_AUPRC",
-                "Parameter_Count",
-                "Feature_Count",
-                "Fold_Duration_Seconds",
-                "Peak_GPU_Memory_MB",
-                "Device",
-            )
-            if column in frame.columns
-        ]
-        resource_frames.append(frame[columns])
-    resources = pd.concat(resource_frames, ignore_index=True)
+    fold_metric_paths = _fold_metric_paths(metrics_dir, model_names)
+    fold_metric_frames = [pd.read_csv(path) for path in fold_metric_paths]
+    ranking_invariance = _fold_ranking_invariance(fold_metric_frames)
+    resources = _resource_table(fold_metric_frames)
     resources.to_csv(metrics_dir / "resource_usage.csv", index=False)
 
     tracked_payload = {
@@ -241,6 +329,8 @@ def finalize_formal_run(settings, run_id: str, model_names) -> dict:
         "run_id": run_id,
         "run_kind": "formal",
         "git_commit": _git("rev-parse", "HEAD"),
+        "training_git_commit": _training_commit(settings, run_id),
+        "analysis_git_commit": _git("rev-parse", "HEAD"),
         "git_dirty_at_finalization": bool(_git("status", "--porcelain")),
         "models": list(model_names),
         "outer_folds": protocol.outer_folds,
@@ -248,7 +338,14 @@ def finalize_formal_run(settings, run_id: str, model_names) -> dict:
         "bootstrap_replicates": protocol.bootstrap_replicates,
         "patient_group_source": "analysis.v_patient_encounters.patient_id",
         "selection_metric": settings.training.selection_metric,
+        "ranking_invariance": ranking_invariance,
         "dataset_fingerprint": dataset_fingerprint(settings),
+        "analysis_implementation_sha256": {
+            "src/diliplus/evaluation/finalize.py": file_sha256(Path(__file__)),
+            "src/diliplus/evaluation/metrics.py": file_sha256(
+                Path(__file__).with_name("metrics.py")
+            ),
+        },
         "hardware": {
             "platform": platform.platform(),
             "processor": os.environ.get("PROCESSOR_IDENTIFIER") or platform.processor(),

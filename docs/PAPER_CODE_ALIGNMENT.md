@@ -232,7 +232,8 @@ Nash equilibrium 或由 MTL 导致的 self-calibration。旧论文/旧审查中�
 它不接受 `alpha`，也不应用类别权重。论文只能称为 unweighted focal modulation；不得再写固定
 `alpha=0.25`，也不得称为 class-balanced 或 alpha-balanced focal loss。
 
-模型选择使用验证集 AUROC，而不是 AUPRC；论文可说“报告时优先解释 AUPRC”，不能说训练/早停以 AUPRC 为唯一目标。
+Code-10 正式训练以独立 selection partition 的 AUPRC 作为唯一模型选择和 early-stopping 指标；
+AUROC 同时记录但不参与 epoch 选择。
 
 ### 5.4 温度缩放
 
@@ -255,9 +256,12 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 | AUROC | `roc_auc_score` |
 | AUPRC | `average_precision_score` |
 | Brier | `brier_score_loss` |
+| NLL | clipped Bernoulli negative log-likelihood |
+| Calibration intercept/slope | 纯 NumPy 二参数 Newton/IRLS，避免 Windows 原生库冲突 |
+| O:E ratio | observed positive count / summed expected probability |
 | Quantile ECE | 10 个等频预测概率分箱 |
-| pAUC | FPR 0–0.2 区间积分，再除以 0.2 归一化 |
-| NetBenefit AUDC | 阈值 0.01–0.99 的净收益，负值先截为 0 再积分 |
+| normalized pAUC | FPR≤0.05/0.10/0.20，各自除以对应最大 FPR |
+| Net benefit / DCA AUDC | 阈值 0.5%–5%、步长 0.25%；同时保存 model/treat-all/treat-none |
 
 论文必须明确 pAUC 是归一化 pAUC，AUDC 也不是单一临床阈值上的净收益。把 AUDC 称为“临床有效性”属于过度解释；它只是当前数据和模型概率下的统计决策曲线摘要。
 
@@ -283,6 +287,29 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 - 该 pre-Code-07 历史校准表中 TA-MedBERT AUPRC 最高，但与 BaselineMedBERT 的差异是否统计显著尚未做配对检验；新正式模型之间的比较必须由 Code-10 重跑。
 - 现有报告只为 AUROC bootstrap 计算置信区间；论文表使用的是折间均值 ± 标准差，不应称作所有指标的 95% CI。
 
+### 6.1 Code-10 当前正式结果
+
+修复后的唯一主分析是 `code10_formal_128d4h_seed0`：44,631 encounters、315 positives、
+44,611 patient clusters，六模型各 5 折；95% CI 和 primary-vs-comparator 差异均来自 1,000 次
+patient-cluster bootstrap。校准后 pooled OOF 结果为：
+
+| Model | AUROC | AUPRC | Brier | NLL |
+|---|---:|---:|---:|---:|
+| MultiModalTextCNN | 0.8456 | 0.0864 | 0.00681 | 0.03469 |
+| MultiModalBiLSTM | 0.8443 | 0.0800 | 0.00692 | 0.03595 |
+| MultimodalTransformerBaseline | 0.8394 | 0.0699 | 0.00714 | 0.03649 |
+| TimeAwareMultimodalTransformer | 0.8480 | 0.0678 | 0.00814 | 0.03932 |
+| LogisticRegression | **0.8781** | 0.1087 | **0.00661** | **0.03264** |
+| XGBoost | 0.8598 | **0.1139** | 0.00665 | 0.03318 |
+
+primary 的 AUPRC 显著低于 Logistic Regression 和 XGBoost，Brier/NLL 也劣于五个比较器；
+因此旧稿“主模型优于所有基线”的核心结论被正式结果否定。128/8 敏感性没有提供足以替换
+预注册 128/4 主分析的 AUPRC 证据。三 seed 中 TextCNN/primary 的 AUPRC 分别为
+0.0845±0.0018 和 0.0759±0.0088；primary 仅 1/3 seed 方向上更高，且 3/3 seed 的 Brier/NLL
+均显著更差。证据入口是 `manifests/code10_formal_run.json`、
+`manifests/code10_architecture_sensitivity.json` 和 `manifests/code10_seed_stability.json`；论文
+Table 2/Figure 2/3 尚未由这些新结果重建。
+
 ## 7. 论文章节—代码映射
 
 本节同时保留旧稿主张的审计轨迹。凡引用 51,316/507、TA-MedBERT、旧性能 CSV 或旧 Figure
@@ -302,7 +329,7 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 | Method: target blinding | 同次住院、严格预测前诊断及 K71/目标文字屏蔽 | `data/diagnoses.py`、`data/diagnosis_audit.py` | A，真实 Parquet 审计 PASS；`create_time` 作为可用时间代理仍须披露 |
 | Method: MTL equation | DILI + AKI | `deep_trainer_calibrated.py` | D，Code-07 后 active code 已明确删除 AKI/MTL 分支 |
 | Method: model configuration | 768/12 layers | `models/*.py` | D，实际 128/2 layers |
-| Results: model table | 六模型校准指标 | `reports/05_Calibrated_Results_Table.csv` | C，主体数值仅作为 pre-Code-07 历史轨迹可追溯 |
+| Results: model table | 六模型校准指标 | `manifests/code10_formal_run.json` | A（新证据）/D（旧稿结论）；正式结果已完成且不支持主模型优越性，论文表和正文尚未同步 |
 | Results: calibration paradox | 原生 MTL 自校准、温度缩放破坏 TA | raw/calibrated predictions + Figure 3 | D/C，实验不配对、MTL 未激活、ECE 定义混用 |
 | Results: 72h | TA AUPRC 0.11277、保留 12.5% | `reports/06a...csv` | C，数值存在，但实验脚本有已知掩码与概率版本问题 |
 | Results: IG | Clopidogrel +0.085、Metformin -0.101 | `06b_Target_Patient_Attribution.csv` | C，单病例局部模型归因；不是毒性/保护效应 |
@@ -319,7 +346,7 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 |---|---|---|
 | Baseline Table | [`src/diliplus/reporting/table1.py`](../src/diliplus/reporting/table1.py) | Code-10 确定性正式队列已生成 44,631 encounters / 44,611 patients 的机器可读表、论文格式表、join/schema/baseline audit 和 tracked manifest；论文仍须逐格同步 |
 | Architecture Table | 手写在 `main.tex` | Code-07 后须同步正式新名称、from-scratch、128/2 层、单任务和无 alpha 的 loss 合同 |
-| Performance Table | `reports/05_Calibrated_Results_Table.csv` | 主要数值可追溯；正文存在一处 AUPRC 错写 |
+| Performance Table | `manifests/code10_formal_run.json` + run-specific metrics | Code-10 正式结果已完成；旧 CSV 仅作历史轨迹，Table 2 待重建 |
 
 ### 8.2 图片
 
@@ -362,8 +389,9 @@ pre-Code-07 历史报告中的 TA-MedBERT：
 
 Code-09 已改为使用真实 event time 对 medication/laboratory/diagnosis 三模态同步物理截断，
 TextCNN 也只消费全部 token 均可见的卷积窗口；当前 24 h 模型数据只允许 effective
-24/48/72 h，0/12 h 不能从已截断 artifact 重建。真实 availability audit 已通过，但尚无
-Code-10 模型 artifact，因此没有修复后的性能和 Figure 4。在正式重跑前，旧 72 h 数字不能
+24/48/72 h，0/12 h 不能从已截断 artifact 重建。真实 availability audit 已通过，Code-10
+主模型 artifact 已存在，但 24/48/72 h 性能评价尚未执行，因此仍没有修复后的 Figure 4。
+在正式 early-warning 重跑前，旧 72 h 数字不能
 继续作为当前结果，更不能写“可用于预防性干预”或“已证明 72h 预警有效”。
 
 ## 10. 局部解释和扰动分析的真实含义
@@ -520,7 +548,7 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 ## 15. 当前建议的大修顺序
 
 1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split、版本化 artifact，以及 Code-07 模型/损失语义合同。
-2. Code-08 cohort/Table 1 和 Code-09 early-warning/消融合同已完成；Code-10 已冻结 earliest-timestamp 全部 ALT/AST 合并的确定性标签规则，正式 cohort 变为44,631 encounters/315 positives；下一步执行唯一正式性能 run。
+2. Code-08 cohort/Table 1、Code-09 输入/消融合同、Code-10 六模型主运行、128/8敏感性和三 seed 稳定性均已完成；下一步执行最低消融和24/48/72 h early-warning 性能。
 3. 论文后续统一采用 `TimeAwareMultimodalTransformer`/TA-MMT，并只保留当前实现和新实验真正支持的创新点。
 4. 用新结果重做 Table 1、Table 2、Figure 1b/1d/2/3/4。
 5. 把 Figure 5/6 降级为单病例模型审计，并改掉因果/治疗用语。
@@ -536,5 +564,6 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 | 2026-08-17 | `2bfe6ef`（Checkpoint-01）；Code-07 建立于其上 | 未修改 | 冻结 Code-00--06 合同；完成 Code-07：正式模型改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`，旧名仅作 Python 导入兼容；单任务 AHI proxy、unweighted focal (`gamma=2`, no alpha/class weight)、无 AKI/MTL/tuple、逐样本 diagnosis-only dropout、from-scratch；共享配置强制有效 hidden/head 关系；44/44 tests、语义 audit 与 canonical artifact smoke PASS；未训练正式模型，pre-Code-07 结果继续仅作历史证据 |
 | 2026-08-17 | `cc7d434` | 未修改 | 完成并冻结 Code-08/09：真实 Table 1 查询 PASS（46,864 encounters、46,844 patients、391 positives；所有 encounter-level join inflation=1），证实全院住院混合场景；24/48/72 h 三模态 strict cutoff 与 6 项最低消融合同 PASS；未训练/未估计性能，baseline lab 并列项标签决策待冻结 |
 | 2026-08-17 | `6ef982c` 后继 dirty implementation；待 Code-10 checkpoint | 未修改 | 冻结 Code-10 协议：确定性 earliest-timestamp ALT/AST 全同行规则、真实 source patient_id grouped split、AUPRC 早停、128/4主配置与128/8敏感性、六模型 raw/calibrated 同 logits、扩展指标、patient-cluster bootstrap/配对比较和完整结果 manifest；真实标签聚合审计 PASS（44,631 encounters、315 positives）；尚未正式训练 |
+| 2026-08-17 | 主训练 `22b4b59`；8头 `2b60501`；seed-1 `0d3590f`；seed-2 `8ddd65f` | 未修改 | Code-10 六模型 30/30 folds、128/8 两模型 10/10 folds、primary/TextCNN 三 seed 稳定性均 PASS；正式结果否定旧稿主模型优越性，TextCNN AUPRC 更稳定且 primary 的 Brier/NLL 在3/3 seed更差；aggregate manifests 与本地逐样本/逐折结果已保存，最低消融与 early-warning 性能待运行 |
 
 以后每次完成会改变论文结论的代码修改，都应在此表增加一行。

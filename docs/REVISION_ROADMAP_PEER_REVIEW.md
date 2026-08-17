@@ -1256,3 +1256,35 @@ AUPRC early stopping 均与主分析一致。
 8-test/mode correction family 中 Holm-adjusted `p=0.01598`。这说明概率误差对 head 数敏感，
 但不改变“主模型没有优于传统基线”的主结论。配对证据见
 `manifests/code10_architecture_sensitivity.json`。
+
+### 21.4 三种子稳定性
+
+按预注册规则，以 seed-0 主运行中 pooled calibrated AUPRC 最高的深度比较器
+`MultiModalTextCNN` 与 primary 做额外 seed-1/seed-2 五折训练；seed-0 直接复用正式主运行，
+没有重复训练或事后更换比较器。`code10_stability_primary_textcnn_seed1` 从 clean commit
+`0d3590f` 启动并 **PASS**，耗时 940.13 s；
+`code10_stability_primary_textcnn_seed2` 从 clean commit `8ddd65f` 启动并 **PASS**，耗时
+1,000.25 s。三个 run 的 OOF membership 均为同一 44,631 encounters、315 positives、
+44,611 patient clusters。
+
+校准后 pooled 指标的 seed-level mean ± sample SD 如下。这里三个 seed 是优化随机性敏感性，
+不是三个独立队列，因此不对三个点估计伪造跨 seed 置信区间；每个 seed 内的 95% CI 仍来自
+1,000 次 patient-cluster bootstrap。
+
+| Model | AUROC mean ± SD | AUPRC mean ± SD | Brier mean ± SD | NLL mean ± SD |
+|---|---:|---:|---:|---:|
+| MultiModalTextCNN | 0.8494 ± 0.0033 | 0.0845 ± 0.0018 | 0.006805 ± 0.000017 | 0.03449 ± 0.00017 |
+| TimeAwareMultimodalTransformer | 0.8479 ± 0.0093 | 0.0759 ± 0.0088 | 0.007520 ± 0.000548 | 0.03732 ± 0.00173 |
+
+primary-minus-TextCNN 的 AUPRC 差值在三个 seed 分别为 -0.01857、+0.00241、-0.00966；仅
+1/3 seed 方向上有利于 primary，且三次 Holm 校正后均不显著。AUROC 差值方向也不一致。
+相反，Brier 与 NLL 的差值在 3/3 seed 均为正，即 primary 的概率误差一致更高，且每个 seed
+的配对 patient-cluster bootstrap 在各自 family 内 Holm-adjusted `p<0.05`。因此稳定性结果
+不支持“主模型稳定优于深度基线”，并进一步显示 primary 对训练 seed 更敏感、校准表现较差。
+
+汇总 recorded run `code10_seed_stability_summary_vscode_v2` **PASS（2.48 s）**；其前一次
+`code10_seed_stability_summary_vscode` 因预测 fold 文件名匹配错误在读取阶段失败（2.17 s），
+没有改动训练 artifact 或产生统计结果，失败记录保留。详细本地 CSV 位于
+`reports/runs/code10_seed_stability_summary/`，可提交 aggregate-only 证据见
+`manifests/code10_seed_stability.json`。下一步是 Code-09 最低消融性能与 24/48/72 h
+early-warning 性能；完成前不得重建最终 Table 2/Figure 2--4 或同步论文结论。

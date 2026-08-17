@@ -39,7 +39,10 @@ python pipelines/01_build_dataset.py --stages diagnoses diagnosis_audit vocabula
 已成功重建 cohort/Table 1，Code-09 已完成 strict early-warning 和最低消融执行合同。进入
 Code-10 已冻结确定性 baseline ALT/AST 同时间合并规则：正式标签从 aligned lab 重新构建，
 legacy 只允许显式 `pilot_legacy` 流水线试跑。正式24 h标签审计得到44,631 encounters、44,611
-patients、315 positives；在正式六模型 run 完成前仍不得引用任何旧性能作为修复后结果。
+patients、315 positives。六模型单 seed/5-fold、128/8 敏感性及 primary/TextCNN 三 seed
+稳定性均已完成；正式 aggregate 证据分别见 `manifests/code10_formal_run.json`、
+`manifests/code10_architecture_sensitivity.json` 和 `manifests/code10_seed_stability.json`。
+旧 checkpoint 和旧性能仍不得作为修复后结果。
 
 需要在 VS Code 中看到完整执行过程时，使用 `Terminal -> Run Task`。当前提供诊断构建、
 Code-00/04 确定性重建、Code-04 pseudo-index 敏感性、Code-05 真实 split 审计、Code-06

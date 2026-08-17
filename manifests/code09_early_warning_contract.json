@@ -1,0 +1,125 @@
+{
+  "contract": "code09_strict_early_warning_v1",
+  "status": "PASS",
+  "base_prediction_gap_hours": 24.0,
+  "effective_horizons_hours": [
+    24.0,
+    48.0,
+    72.0
+  ],
+  "unsupported_horizons_below_base_gap": "cannot be reconstructed from already-censored model artifacts",
+  "cutoff_rule": "event_time < index_time - effective_horizon",
+  "implemented_as": "event_age_to_prediction > effective_horizon - base_prediction_gap",
+  "modalities_physically_zeroed": {
+    "medication": [
+      "x_med",
+      "dt_med",
+      "age_med_hours"
+    ],
+    "laboratory": [
+      "x_lab",
+      "v_lab",
+      "dt_lab",
+      "age_lab_hours"
+    ],
+    "diagnosis": [
+      "x_diag",
+      "age_diag_hours"
+    ]
+  },
+  "horizon_availability": [
+    {
+      "base_prediction_gap_hours": 24.0,
+      "effective_horizon_hours_before_index": 24.0,
+      "additional_cutoff_hours_before_prediction": 0.0,
+      "encounters": 46864,
+      "positive_encounters": 391,
+      "negative_encounters": 46473,
+      "prevalence_pct": 0.8343291225674291,
+      "medication_events_retained": 1111860,
+      "medication_missing_encounters": 0,
+      "medication_length_median": 17.0,
+      "medication_length_q1": 11.0,
+      "medication_length_q3": 27.0,
+      "laboratory_events_retained": 283723,
+      "laboratory_missing_encounters": 6998,
+      "laboratory_length_median": 6.0,
+      "laboratory_length_q1": 6.0,
+      "laboratory_length_q3": 6.0,
+      "diagnosis_events_retained": 215543,
+      "diagnosis_missing_encounters": 2745,
+      "diagnosis_length_median": 4.0,
+      "diagnosis_length_q1": 3.0,
+      "diagnosis_length_q3": 6.0
+    },
+    {
+      "base_prediction_gap_hours": 24.0,
+      "effective_horizon_hours_before_index": 48.0,
+      "additional_cutoff_hours_before_prediction": 24.0,
+      "encounters": 46864,
+      "positive_encounters": 391,
+      "negative_encounters": 46473,
+      "prevalence_pct": 0.8343291225674291,
+      "medication_events_retained": 870670,
+      "medication_missing_encounters": 10902,
+      "medication_length_median": 13.0,
+      "medication_length_q1": 2.0,
+      "medication_length_q3": 23.0,
+      "laboratory_events_retained": 219257,
+      "laboratory_missing_encounters": 16320,
+      "laboratory_length_median": 6.0,
+      "laboratory_length_q1": 0.0,
+      "laboratory_length_q3": 6.0,
+      "diagnosis_events_retained": 168273,
+      "diagnosis_missing_encounters": 12582,
+      "diagnosis_length_median": 3.0,
+      "diagnosis_length_q1": 0.0,
+      "diagnosis_length_q3": 5.0
+    },
+    {
+      "base_prediction_gap_hours": 24.0,
+      "effective_horizon_hours_before_index": 72.0,
+      "additional_cutoff_hours_before_prediction": 48.0,
+      "encounters": 46864,
+      "positive_encounters": 391,
+      "negative_encounters": 46473,
+      "prevalence_pct": 0.8343291225674291,
+      "medication_events_retained": 682260,
+      "medication_missing_encounters": 18986,
+      "medication_length_median": 9.0,
+      "medication_length_q1": 0.0,
+      "medication_length_q3": 19.0,
+      "laboratory_events_retained": 169350,
+      "laboratory_missing_encounters": 23455,
+      "laboratory_length_median": 0.0,
+      "laboratory_length_q1": 0.0,
+      "laboratory_length_q3": 6.0,
+      "diagnosis_events_retained": 131732,
+      "diagnosis_missing_encounters": 20323,
+      "diagnosis_length_median": 2.0,
+      "diagnosis_length_q1": 0.0,
+      "diagnosis_length_q3": 5.0
+    }
+  ],
+  "synthetic_cutoff_audit": {
+    "status": "PASS",
+    "effective_horizon_hours": 48.0,
+    "boundary_rule": "event_age_to_prediction > effective_horizon - base_gap",
+    "medication_events_retained": 1,
+    "medication_missing_encounters": 0,
+    "laboratory_events_retained": 1,
+    "laboratory_missing_encounters": 0,
+    "diagnosis_events_retained": 1,
+    "diagnosis_missing_encounters": 0,
+    "encounters": 1
+  },
+  "input_sha256": {
+    "03_dili_dual_stream_tensors.parquet": "9B22E55549A179E9439F8FEA749D6B7C90BF62686E754E04AFC0E22EB79A1E42",
+    "03b_diag_tensors.parquet": "72EC45E24A795C53ABD1C38D69880A12D2D15F16E776B1ECC6FBA9C3F29F4B52"
+  },
+  "output_sha256": {
+    "horizon_availability.csv": "7429C58874029A78FC8FB3C9F92A39D334967888F95FAFCC9BE34DD898407002"
+  },
+  "performance_estimated": false,
+  "training_performed": false
+}

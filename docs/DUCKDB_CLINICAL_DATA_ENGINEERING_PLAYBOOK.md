@@ -2,7 +2,7 @@
 
 > 文档性质：面向 Agent 和研究人员的长期知识备份 / 新项目启动手册
 > 当前实例：DILI-PLUS 住院多重用药与肝损伤风险建模
-> 最近核对：2026-08-16
+> 最近核对：2026-08-17（Code-08 Table 1 分阶段查询与零匹配防护）
 > 技术真值优先级：当前源码与真实运行产物 > 本文档 > 论文文字或历史脚本
 
 ## 1. 为什么需要这份文档
@@ -433,6 +433,182 @@ first_med_time <= event_time < prediction_time
 - 不得让词表构建无意读取测试标签；
 - 截断、padding、缺失模态处理和数值标准化必须记录；
 - 数据、词表和配置指纹要进入模型 artifact。
+
+### 9.7 Stage 7：Code-08 cohort 描述与 Table 1 查询链
+
+正式实现：`src/diliplus/reporting/table1.py`；唯一论文资产入口：
+
+```powershell
+python pipelines/05_build_paper_assets.py --stages table_1
+```
+
+`05_build_paper_assets.py` 确实调用 `diliplus.reporting.table1.generate_table_1`。新增
+`--stages table_1` 的原因是 Table 1 可以单独重建，不必同时消费尚未由 Code-10 更新的旧性能
+结果和图片。
+
+#### 9.7.1 为什么旧查询会中断或得到错误人数
+
+旧 Table 1 把以下逻辑塞进一个大 SQL：旧 `label_dili`、人口学、原始用药、未按
+prediction time 过滤的诊断，以及按患者键连接的整张 `laboratory_report_sub`。这会同时产生：
+
+- 标签列名和当前正式 cohort 不一致；
+- 论文曾使用的 51,316 条旧 cohort 与当前 24 h 模型 cohort 46,864 条混淆；
+- 患者级化验连接到多次住院，形成隐蔽的一对多行膨胀；
+- 原始大表扫描和连接导致内存中断；
+- 捕获 SQL 异常后函数直接 `return`，上层 pipeline 仍可能看起来正常结束；
+- 连接到一个“名称相似”的关系或错误键时可能得到 0 行，但没有 fail-fast。
+
+因此解决方法不是继续猜表名或在同一大 SQL 上补 `DISTINCT`。`DISTINCT` 可能隐藏错误连接，
+不能证明实体和时间合同正确。
+
+#### 9.7.2 当前唯一允许的分阶段数据流
+
+| 阶段 | 左侧锚点 | 右侧关系/产物 | 连接键与期望粒度 | 失败条件 |
+|---|---|---|---|---|
+| 0 cohort anchor | 无 | `prediction_gap_24h/03_dili_dual_stream_tensors.parquet` | 一行一 `encounter_id`；必须有 `label_ahi_proxy` | 0 行、空/重复 encounter、标签不是 `{0,1}`、时间不可解析 |
+| 1 诊断 | 正式 cohort | `prediction_gap_24h/03b_diag_tensors.parquet` | `encounter_id` 一对一；诊断已在上游限制为同住院且早于 prediction time | 重复、0 匹配、join 后 N 改变 |
+| 2 住院维表 | 上一步 | `analysis.v_patient_encounters` | 规范化后的 `encounter_id`；聚合/去重后仍一行一 encounter | 关系或字段缺失、0 匹配、同 encounter 对应多个 patient |
+| 3 人口学 | encounter 映射出的 patient | `analysis.v_patient_profile` | 仅对 demographic dimension 使用 `patient_id` 多对一连接 | 0 匹配、join 后 encounter N 改变；缺失保留并报告 |
+| 4 基线化验 | 上一步 | `data_cache/01_aligned_dili_labs.parquet` | 已带 encounter 标签的缓存按 `encounter_id` 聚合后一对一 | 0 匹配、重复 aggregate、join 后 N 改变 |
+
+这里允许 patient key 连接人口学，是因为 patient profile 本来就是患者维表；但 patient key
+不能用来连接诊断、用药或化验事件。人口学连接也只能发生在 encounter 已经从正式 cohort
+精确映射到 patient 之后。
+
+药物事件数、化验事件数和观察窗直接来自模型实际读取的动态 Parquet，不再重新扫描源库；
+合并症标志来自 Code-03 已过滤的诊断 Parquet，不再连接缺少时间字段的
+`analysis.feature_diagnoses`；基线 ALT/AST/TBIL 来自定义冻结 cohort 时实际使用的 aligned-lab
+缓存，不再为 Table 1 单独发明另一条原始化验连接链。
+
+#### 9.7.3 查询前先验证关系和字段，不猜名字
+
+对每个源关系先执行 schema contract：
+
+```sql
+DESCRIBE SELECT * FROM analysis.v_patient_encounters;
+DESCRIBE SELECT * FROM analysis.v_patient_profile;
+```
+
+当前 Table 1 只直接读取这两个源库关系，必需字段分别是：
+
+```text
+analysis.v_patient_encounters:
+  encounter_id, patient_id, admit_date, discharge_date, dept_name
+
+analysis.v_patient_profile:
+  patient_id, gender, birth_date
+```
+
+任何关系不存在或字段缺失都应抛异常。不得自动尝试 `patient_encounter`、
+`v_patient_encounter` 等相似名称，也不得在异常后换一个表继续运行。新数据库快照必须重新
+DESCRIBE，不能因为本次通过就永久假定 schema 不变。
+
+字段的真实类别也要做 aggregate-only 探查。当前 `gender` 确认存在 `男`、`男性`、`女`、
+`女性` 四种值；只映射单字版本会把近半数可用性别误报为缺失。类别探查应输出值和计数，
+不得输出 patient ID。
+
+#### 9.7.4 每次 join 必须同时记录的数量
+
+每一步都保存：
+
+```text
+left_rows
+left_unique_encounters
+right_rows
+right_unique_encounters
+output_rows
+output_unique_encounters
+matched_left_encounters
+unmatched_left_encounters
+match_rate
+row_inflation = output_rows / left_rows
+```
+
+必须满足：
+
+```text
+output_rows == left_rows
+output_unique_encounters == left_unique_encounters
+row_inflation == 1
+matched_left_encounters > 0
+```
+
+右表在连接前使用代码显式验证一行一 encounter；Pandas 使用
+`merge(..., validate="one_to_one")`。若一个合法步骤允许一对多，必须先在右侧聚合到目标粒度，
+并在聚合前另存基数审计；不能依赖 join 后 `drop_duplicates` 修补。
+
+2026-08-17 当前快照的真实结果：
+
+| 连接阶段 | 匹配/左侧 | 输出行 | 膨胀系数 |
+|---|---:|---:|---:|
+| time-bounded diagnosis | 46,864 / 46,864 | 46,864 | 1.000000 |
+| encounter dimension | 46,864 / 46,864 | 46,864 | 1.000000 |
+| patient profile | 45,639 / 46,864 | 46,864 | 1.000000 |
+| aligned baseline labs | 46,864 / 46,864 | 46,864 | 1.000000 |
+
+人口学未匹配的 1,225 个 encounter 保留在 cohort 中并作为缺失报告；不得因为 Table 1 某列
+缺失而从模型 cohort 删除病例。最终为 46,864 encounters、46,844 unique patients、391 个
+AHI-proxy positives（0.8343%）；20 名患者各有一次额外住院。科室分布证明这是全院住院混合
+cohort，不是 ICU-only cohort：名称筛查得到重症/监护相关 447 encounters，其余/未知 46,417。
+
+这些数字属于当前快照，其他项目不得硬编码。
+
+#### 9.7.5 出现患者数为 0 或人数不匹配时的排错顺序
+
+严格按下列顺序定位，不要直接改 SQL：
+
+1. **确认正在读哪个配置和产物。** 打印已解析的 config path、model-data directory、文件存在性、
+   Parquet schema、行数和 distinct encounter 数；首先排除读到了旧 0 h/51,316 cohort。
+2. **确认左表实体合同。** 检查 `encounter_id` 是否空、是否重复、实际类型；正式 anchor 不是
+   patient table，也不是 label-only legacy 文件。
+3. **确认源关系精确名称。** 从 `information_schema` 发现候选关系后执行 DESCRIBE/view SQL；
+   不根据记忆添加或删除 `analysis.`、`refined.`、单复数或 `v_` 前缀。
+4. **规范化但不改变键语义。** 两侧只做 `TRIM(CAST(key AS VARCHAR))`；不能用截断、模糊匹配、
+   patient 前缀替代 encounter，或为了提高匹配率拼接多个不同键。
+5. **连接前做 distinct overlap。** 计算左右 distinct key 和 inner-join matched distinct key；若为
+   0，立即停止。不要用 LEFT JOIN + COALESCE 把 0 匹配伪装成全缺失。
+6. **检查 bridge 基数。** 记录每个左键对应右侧 0/1/>1 行的数量；若 >1，先判断这是合法事件
+   一对多还是错误跨住院连接。
+7. **逐阶段连接。** 每次只加一个关系，比较上节十个指标；从最后一个 PASS stage 和第一个
+   FAIL stage 之间定位问题。
+8. **最后才计算 Table 1。** 统计函数不得参与实体/键排错；先证明 N 和 grain，再计算中位数、
+   比例、缺失、P 值和 SMD。
+9. **错误必须传播。** 关系缺失、0 匹配、重复键或 N 改变均以非零退出结束 recorded run；不得
+   catch 后只写一行失败日志并返回成功。
+
+#### 9.7.6 基线化验审计的额外警告
+
+当前冻结标签历史实现只按 `lab_time` 排列 ALT/AST，没有为同一时间戳提供稳定的项目/数值
+tie-break；同时 Code-02 为保持旧论文 cohort，读取了冻结的 legacy label artifact，而没有重算
+标签。Code-08 以当前 aligned-lab 缓存按 `lab_time, lab_item, lab_value` 确定性重建首项后发现：
+
+- AHI-proxy negative 46,473 个中，45,260 个首项状态为正常/低；
+- AHI-proxy positive 391 个中，362 个首项状态为正常/低；
+- positive 中有 5 个确定性首项数值 `>=120`，但没有“正常/低状态且数值 >=120”的直接冲突。
+
+这不是可以用 Table 1 排版消除的差异。它提示冻结 legacy 标签与当前确定性重建之间存在
+同时间并列项/历史规则不完全一致。在 Code-10 正式训练前必须把它作为标签合同决策：要么
+保留冻结 cohort 并在论文明确其规则和该审计限制，要么预先定义同时间多项的临床合并规则、
+重建标签和全部下游产物。不能看到新性能后再选择方案。
+
+#### 9.7.7 输出和复用
+
+本地 aggregate 输出位于 `reports/p0_08_cohort_table1/`：
+
+```text
+table1_characteristics.csv       逐变量显示值、P、SMD、各组 nonmissing/missing
+table1_paper.txt                 可人工核对的论文格式
+cohort_summary.csv               patients/encounters/prevalence/setting
+department_distribution.csv     科室 aggregate 分布
+join_audit.csv                   分阶段连接证据
+baseline_label_audit.csv         状态/数值一致性审计
+source_schema_contract.csv       关系和字段合同
+```
+
+可提交的 `manifests/code08_cohort_table1.json` 只含 aggregate counts、合同和输入/输出哈希，
+不含 patient/encounter ID。最终执行记录为 `code08-table1-20260817-v3`。新项目可以复用
+“schema contract → cohort anchor → one-stage join → cardinality audit → aggregate report”框架，
+但不能直接复用本项目的表名、结局、ICD 前缀、实验室中文名称或匹配阈值。
 
 ## 10. 时间设计模板
 

@@ -60,11 +60,21 @@ class TimeAwareMultimodalTransformer(nn.Module):
         num_heads=4,
         dropout=0.3,
         diagnosis_modality_dropout_prob=0.15,
+        use_medication=True,
+        use_laboratory=True,
+        use_diagnosis=True,
+        use_time_encoding=True,
     ):
         super().__init__()
         if not 0.0 <= diagnosis_modality_dropout_prob < 1.0:
             raise ValueError("diagnosis_modality_dropout_prob must be in [0, 1)")
         self.hidden_size = hidden_size
+        self.use_medication = bool(use_medication)
+        self.use_laboratory = bool(use_laboratory)
+        self.use_diagnosis = bool(use_diagnosis)
+        self.use_time_encoding = bool(use_time_encoding)
+        if not any((self.use_medication, self.use_laboratory, self.use_diagnosis)):
+            raise ValueError("At least one input modality must be enabled")
         self.diagnosis_modality_dropout_prob = float(
             diagnosis_modality_dropout_prob
         )
@@ -114,55 +124,76 @@ class TimeAwareMultimodalTransformer(nn.Module):
         # ---------------------------------------------------------
         # 2. Stream A 向前传播
         # ---------------------------------------------------------
-        emb_med = self.med_embedding(x_med)             
-        t_emb_med = self.med_time2vec(dt_med_norm)        
-        h_med_seq = emb_med + t_emb_med
-        
-        med_key_pad_mask = ~mask_med.bool()
-        med_key_pad_mask[med_key_pad_mask.all(dim=1), 0] = False # 防御全空掩码
-        
-        # 自回归上三角掩码，限制每个位置访问其后的用药事件
-        seq_len_med = x_med.size(1)
-        causal_mask_med = torch.triu(
-            torch.ones(
-                seq_len_med,
-                seq_len_med,
-                dtype=torch.bool,
-                device=x_med.device,
-            ),
-            diagonal=1,
-        )
-        
-        h_med_seq = self.med_transformer(h_med_seq, mask=causal_mask_med, src_key_padding_mask=med_key_pad_mask)
-        h_med = self.ln_med(self.med_pool(h_med_seq, mask_med))
+        if self.use_medication:
+            emb_med = self.med_embedding(x_med)
+            h_med_seq = emb_med
+            if self.use_time_encoding:
+                h_med_seq = h_med_seq + self.med_time2vec(dt_med_norm)
+
+            med_key_pad_mask = ~mask_med.bool()
+            med_key_pad_mask[med_key_pad_mask.all(dim=1), 0] = False
+
+            seq_len_med = x_med.size(1)
+            causal_mask_med = torch.triu(
+                torch.ones(
+                    seq_len_med,
+                    seq_len_med,
+                    dtype=torch.bool,
+                    device=x_med.device,
+                ),
+                diagonal=1,
+            )
+            h_med_seq = self.med_transformer(
+                h_med_seq,
+                mask=causal_mask_med,
+                src_key_padding_mask=med_key_pad_mask,
+            )
+            h_med = self.ln_med(self.med_pool(h_med_seq, mask_med))
+        else:
+            h_med = torch.zeros(
+                x_med.size(0), self.hidden_size, device=x_med.device, dtype=torch.float
+            )
         
         # ---------------------------------------------------------
         # 3. Laboratory stream
         # ---------------------------------------------------------
-        emb_lab_item = self.lab_item_embedding(x_lab)   
-        emb_lab_value = self.lab_value_proj(v_lab_norm.unsqueeze(-1)) 
-        t_emb_lab = self.lab_time2vec(dt_lab_norm) 
-        
-        # Add the laboratory-item, value and learned time representations.
-        h_lab_seq = emb_lab_item + emb_lab_value + t_emb_lab
-        
-        lab_key_pad_mask = ~mask_lab.bool()
-        lab_key_pad_mask[lab_key_pad_mask.all(dim=1), 0] = False
-        
-        # Model interactions among the retained pre-prediction laboratory events.
-        h_lab_seq = self.lab_transformer(h_lab_seq, src_key_padding_mask=lab_key_pad_mask)
-        h_lab = self.ln_lab(self.lab_pool(h_lab_seq, mask_lab))
+        if self.use_laboratory:
+            emb_lab_item = self.lab_item_embedding(x_lab)
+            emb_lab_value = self.lab_value_proj(v_lab_norm.unsqueeze(-1))
+            h_lab_seq = emb_lab_item + emb_lab_value
+            if self.use_time_encoding:
+                h_lab_seq = h_lab_seq + self.lab_time2vec(dt_lab_norm)
+
+            lab_key_pad_mask = ~mask_lab.bool()
+            lab_key_pad_mask[lab_key_pad_mask.all(dim=1), 0] = False
+            h_lab_seq = self.lab_transformer(
+                h_lab_seq, src_key_padding_mask=lab_key_pad_mask
+            )
+            h_lab = self.ln_lab(self.lab_pool(h_lab_seq, mask_lab))
+        else:
+            h_lab = torch.zeros(
+                x_lab.size(0), self.hidden_size, device=x_lab.device, dtype=torch.float
+            )
         
         # ---------------------------------------------------------
         # 4. Stream C 向前传播
         # ---------------------------------------------------------
-        emb_diag = self.diag_embedding(x_diag)
-        h_diag = self.ln_diag(self.diag_pool(emb_diag, mask_diag))
+        if self.use_diagnosis:
+            emb_diag = self.diag_embedding(x_diag)
+            h_diag = self.ln_diag(self.diag_pool(emb_diag, mask_diag))
+        else:
+            h_diag = torch.zeros(
+                x_diag.size(0), self.hidden_size, device=x_diag.device, dtype=torch.float
+            )
         
         # ---------------------------------------------------------
         # 5. Diagnosis-modality dropout（正则化，不声称保持表示期望）
         # ---------------------------------------------------------
-        if self.training and self.diagnosis_modality_dropout_prob > 0:
+        if (
+            self.use_diagnosis
+            and self.training
+            and self.diagnosis_modality_dropout_prob > 0
+        ):
             keep_diag = torch.rand(
                 (h_diag.size(0), 1), device=h_diag.device
             ) >= self.diagnosis_modality_dropout_prob

@@ -81,6 +81,16 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("mock", serialized)
         self.assertIn("diliplus.reporting.figures.perturbation", serialized)
 
+    def test_paper_pipeline_can_build_table1_only(self):
+        module = load_pipeline("05_build_paper_assets.py")
+        with patch.object(module, "load_settings", return_value="settings"), patch.object(
+            module, "run"
+        ) as run:
+            exit_code = module.main(["--stages", "table_1"])
+        self.assertEqual(exit_code, 0)
+        selected = run.call_args.args[1]
+        self.assertEqual([stage[0] for stage in selected], ["table_1"])
+
     def test_training_default_mode_is_calibrated(self):
         module = load_pipeline("02_train_models.py")
         self.assertEqual(
@@ -104,6 +114,15 @@ class PipelineTests(unittest.TestCase):
         module = load_pipeline("02_train_models.py")
         with self.assertRaises(ValueError):
             module.run("settings", "unit-run", "uncalibrated")
+
+    def test_training_ablations_require_explicit_flag(self):
+        module = load_pipeline("02_train_models.py")
+        with patch.object(module, "load_settings", return_value="settings"), patch.object(
+            module, "run"
+        ) as run:
+            exit_code = module.main(["--run-id", "unit-run", "--include-ablations"])
+        self.assertEqual(exit_code, 0)
+        run.assert_called_once_with("settings", "unit-run", "calibrated", True)
 
     def test_evaluation_requires_explicit_run_and_probability_mode(self):
         module = load_pipeline("03_evaluate_models.py")

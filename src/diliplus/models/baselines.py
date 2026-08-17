@@ -292,24 +292,37 @@ class MultiModalTextCNN(nn.Module):
         self.fusion_projection = nn.Sequential(nn.Linear((hidden_size//3)*3 + (hidden_size//2)*2 + hidden_size, hidden_size), nn.ReLU(), nn.Dropout(dropout))
         self.ahi_proxy_head = nn.Linear(hidden_size, 2)
 
+    @staticmethod
+    def _masked_conv_max(sequence, mask, conv):
+        """Pool only convolution windows whose every token is observable."""
+        kernel = conv.kernel_size[0]
+        if sequence.size(1) < kernel:
+            return torch.zeros(
+                sequence.size(0), conv.out_channels, device=sequence.device
+            )
+        masked = sequence * mask.unsqueeze(-1).to(sequence.dtype)
+        features = F.relu(conv(masked.permute(0, 2, 1)))
+        valid_windows = mask.bool().unfold(1, kernel, 1).all(dim=-1)
+        features = features.masked_fill(~valid_windows.unsqueeze(1), float("-inf"))
+        pooled = features.max(dim=2).values
+        any_valid = valid_windows.any(dim=1, keepdim=True)
+        return torch.where(any_valid, pooled, torch.zeros_like(pooled))
+
     def forward(self, x_med, dt_med, mask_med, x_lab, v_lab, dt_lab, mask_lab, x_diag, mask_diag):
         v_lab = torch.nan_to_num(v_lab, nan=0.0) # 🔥 净化
         
-        emb_m = self.med_emb(x_med).permute(0, 2, 1)
-        conv_out_m = [F.relu(conv(emb_m)) for conv in self.convs_med]
-        h_med = torch.cat([F.max_pool1d(out, out.size(2)).squeeze(2) for out in conv_out_m], 1)
+        emb_m = self.med_emb(x_med)
+        h_med = torch.cat(
+            [self._masked_conv_max(emb_m, mask_med, conv) for conv in self.convs_med],
+            dim=1,
+        )
         
         v_lab_norm = torch.log1p(torch.clamp(v_lab, min=0))
-        emb_l = (self.lab_item_emb(x_lab) + self.lab_val_proj(v_lab_norm.unsqueeze(-1))).permute(0, 2, 1)
-        
-        pool_out_l = []
-        for conv in self.convs_lab:
-            if emb_l.size(2) >= conv.kernel_size[0]:
-                out = F.relu(conv(emb_l))
-                pool_out_l.append(F.max_pool1d(out, out.size(2)).squeeze(2))
-            else:
-                pool_out_l.append(torch.zeros(emb_l.size(0), conv.out_channels, device=emb_l.device))
-        h_lab = torch.cat(pool_out_l, 1)
+        emb_l = self.lab_item_emb(x_lab) + self.lab_val_proj(v_lab_norm.unsqueeze(-1))
+        h_lab = torch.cat(
+            [self._masked_conv_max(emb_l, mask_lab, conv) for conv in self.convs_lab],
+            dim=1,
+        )
         
         h_diag = self.static_encoder(x_diag, mask_diag)
         h_fused = self.fusion_projection(torch.cat([h_med, h_lab, h_diag], dim=-1))

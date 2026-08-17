@@ -78,7 +78,7 @@
 | R12 | 随机右删失必然消除了 immortal time bias | **不成立；只能说尝试缓解** | 阴性在用药起止之间用未设种子的 DuckDB `RANDOM()` 均匀抽取时点 | 固定随机种子，比较多种 pseudo-index 方案；检查观察时长分布、阳性率和性能敏感性；论文使用“mitigate”，不用 eliminate/guarantee/unconfounded |
 | R13 | 应直接上 target trial emulation | **不作为当前论文必需项** | 当前问题是预测/模型审计，不识别治疗效果 | 只有未来要回答“换药会不会降低真实风险”时才设计 target trial/因果研究；当前先守住预测边界 |
 | R14 | patient-level split 可能缺失 | **当前快照已核验为成立** | 51,316 encounters、51,295 patient groups；下划线前缀与 `health_reco` 一致，重复患者未跨折 | 保留并加入自动契约测试；更换数据后必须重新核验 |
-| R15 | 模型可称为 ICU/high-acuity 模型 | **尚未由正式代码证明** | 队列代码证明住院多重用药，未见 ICU 场景字段作为纳入条件 | 查明源数据库场景和科室；未证明前使用 inpatient/hospitalised polypharmacy cohort |
+| R15 | 模型可称为 ICU/high-acuity 模型 | **不成立** | Code-08 科室审计确认是全院住院混合 cohort：重症/监护名称筛查 447/46,864，其余/未知 46,417 | 使用 inpatient/hospitalised polypharmacy cohort；不得写 ICU-only |
 
 ## 4. 报告没有充分指出、但当前更严重的问题
 
@@ -125,17 +125,22 @@
 
 因此，“optimal organic self-calibration”“highest Net Benefit”“superior overall”均需删除或由新实验重新证明。
 
-### 4.6 Early-warning 流程尚不能支持 72h 稳健性主张
+### 4.6 Code-09 修复前的 Early-warning 流程不能支持 72h 稳健性主张
 
 - 当前 TA 结果约为：0h AUROC/AUPRC `0.998/0.905`，24h `0.725/0.182`，48h `0.564/0.118`，72h `0.542/0.112`。
 - 72h AUROC 置信区间跨越 0.5，不能称 statistically robust。
-- TextCNN 不消费时间 mask，因而不同 horizon 结果不变；这说明通用 early-warning 评估接口没有对所有模型实现同一语义。
-- 静态诊断在 horizon mask 中从未被时间限制。
-- 当前 early-warning 使用 raw softmax，没有应用各折温度。
+- 修复前 TextCNN 不消费时间 mask，因而不同 horizon 结果不变；这说明旧通用 early-warning 评估接口没有对所有模型实现同一语义。
+- 修复前静态诊断在 horizon mask 中从未被时间限制。
+- 修复前 early-warning 使用 raw softmax，没有应用各折温度。
 
-### 4.7 Table 1 和部分图表缺少可复现产物
+Code-09 已在第 20 节完成输入/cutoff 和 artifact 语义修复，但没有正式模型 artifact，因而尚未
+生成新性能或 Figure 4；上列历史数字仍不可引用为修复后结果。
 
-- 当前 `reports/Table_01_Baseline_Characteristics_DILIPLUS.txt` 只记录 SQL 中断，论文 Table 1 不能视为已由当前代码复现。
+### 4.7 Code-08 前 Table 1 和部分图表缺少可复现产物
+
+- 旧 `reports/Table_01_Baseline_Characteristics_DILIPLUS.txt` 只记录 SQL 中断。Code-08 已在第
+  20 节生成新的机器可读 Table 1、分阶段 join audit 和 tracked manifest；论文仍须在标签合同
+  决策和 Code-10 前后逐格同步，旧失败文件不得继续作为证据。
 - Figure 1b 采样/jitter 未完全固定；Figure 1d bootstrap 也有轻微随机差异。
 - Figure 1c 文件存在但正文未引用，属于 legacy 资产。
 - 报告 CSV 会追加旧运行，可能混合不同版本结果。
@@ -399,12 +404,12 @@ Track B：
 - [ ] P0-01 将研究结局统一为 AHI proxy；决定是否开展临床 DILI adjudication。
 - [x] P0-02 修复 target-defining lab 进入动态输入，并固定 24h primary prediction gap；真实数据时序审计 PASS（详见第 15 节）。
 - [x] P0-03 修复诊断 encounter/time 边界，或从主模型删除诊断。已采用严格同次住院及 `create_time < prediction_time`，见第 16 节。
-- [ ] P0-04 核验 ICU/high-acuity 数据来源；未核验前降级场景表述。
+- [x] P0-04 核验 ICU/high-acuity 数据来源。Code-08 已证明是全院住院混合 cohort，不是 ICU-only；论文继续使用 inpatient/hospitalised polypharmacy cohort。
 - [x] P0-05 删除虚构 MTL/self-calibration，校准真实 128-d/2-layer/4-head 架构和时间公式。论文首轮降调已完成；Code-07 又从 active code 删除 AKI/MTL/tuple 并固定单任务合同，最终稿仍须同步正式新名称和无 alpha 的 loss。
 - [x] P0-06 重建 grouped train/selection/calibration/test 协议，修复 test epoch selection。Code-05 已完成并通过真实队列 split 审计。
 - [x] P0-07 保存 temperature，并用同一 logits 配对生成 raw/calibrated Figure 3。Code-06 artifact/预测合同已完成；Figure 3 仍待 Code-10 正式 run 重做。
-- [ ] P0-08 修复 early-warning cutoff 语义并重跑 Figure 4。
-- [ ] P0-09 成功重跑 Table 1，明确 patients/encounters/setting。
+- [x] P0-08 修复 early-warning cutoff 语义。Code-09 已完成三模态物理截断、TextCNN mask 合同、对应折 artifact/temperature 和真实 horizon availability 审计；Figure 4 性能重跑待 Code-10 正式 artifact。
+- [x] P0-09 成功重跑 Table 1，明确 patients/encounters/setting。Code-08 已生成 46,864 encounters / 46,844 patients / 391 positives 的 aggregate 证据；论文同步和冻结标签并列项决策仍待完成。
 - [ ] P0-10 将 Figure 5/6 降级为模型审计，删除剂量、ARR、安全替换和临床建议暗示。
 - [ ] P0-11 生成唯一正式 run，替换论文全部旧数值。
 - [x] P0-12 删除 `This is TEST.` 并重写 Abstract/Conclusion。首轮论文文字已完成；正式结果数字仍待 Code-10/12 同步。
@@ -413,9 +418,9 @@ Track B：
 
 - [x] P1-01 固定所有随机种子和 pseudo-index，建立 manifest/run directory。Code-00/04 已完成。
 - [x] P1-02 修复/准确描述 Focal Loss alpha。Code-07 改为 `UnweightedFocalLoss(gamma=2)`，接口不接受 alpha，也不使用类别权重。
-- [ ] P1-03 完成最低消融矩阵和 paired comparison。
+- [ ] P1-03 最低消融矩阵的 6 个模型合同已完成；训练与 paired comparison 待 Code-10。
 - [ ] P1-04 报告 calibration slope/intercept、Brier、NLL、QECE 细节和完整 DCA。
-- [ ] P1-05 报告每个 horizon 的 N/positive/prevalence/CI。
+- [ ] P1-05 已报告 24/48/72 h 的 N/positive/prevalence/序列与模态缺失；性能 CI 待 Code-10。
 - [ ] P1-06 增加 cohort-level explainability 稳定性分析，或把单病例明确降为 illustration。
 - [x] P1-07 核验 MedBERT 命名和是否存在预训练。正式名改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`；确认从头训练，旧 MedBERT 名只作 Python 导入兼容。
 - [ ] P1-08 完成 TRIPOD+AI 和 PROBAST+AI 自审。
@@ -565,7 +570,7 @@ Track B：
 | 原优先级项 | 当前状态 | 说明 |
 |---|---|---|
 | P0-01 结局改称 AHI proxy | 论文文字及 active Dataset/trainer/model 接口已迁移 | 正式产物必须含 `label_ahi_proxy`；构建器暂时额外写兼容别名，临床 adjudication 仍未开展 |
-| P0-04 ICU/high-acuity 场景降级 | 论文文字已完成，真实科室构成待核验 | 当前使用 hospitalised/inpatient |
+| P0-04 ICU/high-acuity 场景降级 | 论文文字及真实科室审计均完成 | Code-08 证实 hospital-wide inpatient department mix；不得恢复 ICU-only 表述 |
 | P0-05 删除 MTL/self-calibration，校准架构描述 | 论文首轮降调、Code-05/06 校准协议和 Code-07 单任务代码均已完成 | 论文仍须同步 Code-07 新正式名及无 alpha loss；性能须正式重跑 |
 | P0-10 图示降级为模型审计 | Figure 7 已完成；Figure 6 图内标签待改 | 正文边界已完成 |
 | P0-12 删除测试文字并重写 Abstract/Conclusion | 当前结果版本已完成 | 正式重跑后仍需更新最终数字 |
@@ -585,15 +590,15 @@ Track B：
 | **Code-05 重建 grouped split 与 calibration（已完成）** | P0-06/P0-07 | 外层 grouped test；内层 training、selection validation、calibration 分离；test 只评一次 | `training/deep_trainer.py`、`deep_trainer_calibrated.py`、`ml_baselines*.py` | 自动证明 outer-test ID 未参与训练/早停/校准；raw/calibrated 来自同一 logits |
 | **Code-06 统一 checkpoint/inference artifact（已完成）** | P0-07 | checkpoint 同时保存模型、split、epoch、temperature、配置和 run ID；下游统一加载 | 新 artifact 工具、training/evaluation/explainability 调用点 | early-warning、IG、perturbation 明确使用 raw 或 calibrated 输出，不再混称 |
 | **Code-07 模型和损失语义清理（已完成）** | P1-02/P1-07 | 正式接口迁移到 AHI proxy；移除 focal alpha/类别权重；统一 from-scratch 正式模型命名 | `models/`、training loss、配置、报告标签 | 统一 registry/output helper；语义单元测试覆盖输出维度、loss 公式、时间编码、dropout 和模型命名 |
-| Code-08 重做 cohort/Table 1 | P0-09 | 修复 Table 1 中断；核验 patients、encounters、setting、重复住院和基线肝酶逻辑 | `reporting/table1.py`、cohort audit 工具 | 机器可读 CSV 与论文表逐格一致；场景构成有数据证据 |
-| Code-09 严格 early-warning 与最低消融 | P0-08/P1-03/P1-05 | 所有模型按相同 cutoff 语义重建输入；完成 medication-only、lab-only、without-time、without-diagnosis、full model | `evaluation/early_warning.py`、模型/训练 pipeline | 每个 horizon 报 N/positive/prevalence/CI；每个消融共享 split 和输入边界 |
+| **Code-08 重做 cohort/Table 1（代码与真实查询已完成）** | P0-09 | 修复 Table 1 中断；核验 patients、encounters、setting、重复住院和基线肝酶逻辑 | `reporting/table1.py`、cohort audit 工具 | CSV/论文格式、join/schema/baseline audit 与 tracked manifest 已生成；标签并列项决策和论文逐格同步待办 |
+| **Code-09 严格 early-warning 与最低消融（合同已完成）** | P0-08/P1-03/P1-05 | 所有模型按相同 cutoff 语义重建输入；完成 medication-only、lab-only、without-time、without-diagnosis、full model | `evaluation/early_warning.py`、模型/训练 pipeline | 24/48/72 h availability 与 6/6 模型语义审计 PASS；性能 CI/paired comparison 待 Code-10 训练 |
 | Code-10 正式性能、校准和统计 | P0-11/P1-04 | 生成唯一正式 OOF 结果，完成 AUROC/AUPRC/Brier/NLL、calibration slope/intercept、配对比较和 DCA | training/evaluation/reporting | Table 2、Figure 2/3 和正文数字全部回溯到同一 run manifest |
 | Code-11 解释与图片清理 | P0-10/P1-06 | 修正 Figure 6 图内标签；病例限定在 outer test；CSV 改用 row index、embedding attenuation、delta predicted probability；增加 cohort-level 稳定性或明确仅作 illustration | `explainability/*.py`、`reporting/figures/attribution.py`、`perturbation.py` | 图题、轴、图例、CSV、日志和正文术语一致；无 patient ID、dose、ARR 或保护/致病效应暗示 |
 | Code-12 正式全流程重跑与论文同步 | Phase 9 | 从冻结数据和配置生成最终表图，更新论文数字并完成投稿前检查 | `pipelines/`、README、paper repo | 单一 run ID；测试和 leakage checks 通过；论文可编译且只提交必要源文件 |
 
 ### 14.1 下一步建议
 
-Code-01/02 已于 2026-08-16 完成，见第 15 节；Code-03 见第 16 节；Code-00/04 见第 17 节；Code-05/06 见第 18 节；Checkpoint-01 与 Code-07 见第 19 节。若继续图片清理，仍可完成 **Image-Fix-01：Figure 6 可见标签修订**。下一项核心工作是 **Code-08：重做 cohort/Table 1**，随后处理 Code-09 严格 early-warning/最低消融；只有这些合同完成后，Code-10 才启动唯一正式性能 run。
+Code-01/02 已于 2026-08-16 完成，见第 15 节；Code-03 见第 16 节；Code-00/04 见第 17 节；Code-05/06 见第 18 节；Checkpoint-01 与 Code-07 见第 19 节；Code-08/09 见第 20 节。进入 Code-10 前先冻结 Code-08 暴露的 baseline ALT/AST 同时间并列项/legacy 标签决策；随后启动唯一正式性能和消融 run。若继续图片清理，仍可独立完成 **Image-Fix-01：Figure 6 可见标签修订**。
 
 ## 15. P0-02 执行记录：目标化验与 prediction time 修复（2026-08-16）
 
@@ -1008,3 +1013,134 @@ console 和命令/环境/退出码/日志哈希记录保存在被 Git 忽略的 
   和 diagnosis-only dropout。该同步只改如实的方法描述；性能数字要等 Code-10 正式 run。
 - 下一步是 **Code-08：重做 cohort/Table 1**，再做 Code-09 early-warning/最低消融，最后才进入
   Code-10 正式训练与统计。
+
+## 20. Code-08/09 执行记录：cohort/Table 1、严格 early-warning 与最低消融（2026-08-17）
+
+### 20.1 Code-08 Table 1 查询重构
+
+确认 `pipelines/05_build_paper_assets.py` 的 `table_1` stage 是论文 Table 1 的正式入口，并新增
+`--stages table_1`，允许只重建表格而不触发仍基于历史性能数据的图片。
+
+旧实现的主要问题不是一个单独表名，而是把旧标签、人口学、原始用药、未定时诊断和整张
+患者级化验表放进同一个大 SQL；这同时造成 legacy/current cohort 混用、潜在跨住院复制、
+内存中断和异常被吞掉。新实现以
+`prediction_gap_24h/03_dili_dual_stream_tensors.parquet` 为唯一 cohort anchor：
+
+1. 动态事件数和观察窗直接来自模型输入 Parquet；
+2. 合并症只来自 Code-03 同 encounter 且早于 prediction time 的诊断 Parquet；
+3. 住院和 patient 映射只使用经 schema contract 核验的
+   `analysis.v_patient_encounters`；
+4. patient profile 仅用于年龄/性别维度；真实性别值 `男/男性/女/女性` 均已映射；
+5. 基线化验使用定义该冻结 cohort 的 aligned-lab 缓存，不再二次扫描
+   `laboratory_report_sub`；
+6. 每个右表在连接前要求目标粒度唯一，连接使用 one-to-one validation；0 匹配、重复键、N
+   改变或关系/字段缺失均抛异常并令 recorded run 非零退出。
+
+最终真实运行 `code08-table1-20260817-v3` **PASS（2.79 s）**：
+
+| 项目 | 结果 |
+|---|---:|
+| encounters | 46,864 |
+| unique patients | 46,844 |
+| patients with repeated encounters | 20 |
+| AHI-proxy positives | 391 (0.8343%) |
+| encounter dimension matched | 46,864 / 46,864 |
+| patient profile matched | 45,639 / 46,864 (97.3861%) |
+| aligned baseline labs matched | 46,864 / 46,864 |
+| every join row inflation | 1.000000 |
+| critical-care-name screen | 447 encounters |
+| other/unknown department | 46,417 encounters |
+
+因此当前队列有数据证据支持“hospital-wide inpatient cohort with department mix”，不支持
+ICU-only 表述。年龄和性别均为 45,639/46,864 nonmissing；人口学缺失不改变模型 cohort N。
+
+本地输出位于 `reports/p0_08_cohort_table1/`，包括 machine-readable Table 1、paper text、
+cohort summary、department distribution、join audit、schema contract 和 baseline label audit；
+tracked `manifests/code08_cohort_table1.json` 只保存 aggregate 和哈希。详细的可复用查询/排错
+方法已追加到 `docs/DUCKDB_CLINICAL_DATA_ENGINEERING_PLAYBOOK.md` 第 9.7 节。
+
+### 20.2 Code-08 暴露的标签合同决策
+
+Code-02 为保持旧论文 cohort，使用冻结 legacy label artifact；旧 raw label SQL 对 ALT/AST 只按
+`lab_time` 排序，同时间多项没有确定性 tie-break。Code-08 以
+`lab_time, lab_item, lab_value` 重建确定性首项后，391 个 positive 中只有 362 个首项状态为
+正常/低，且 5 个首项数值 `>=120`；46,473 个 negative 中有 45,260 个首项状态为正常/低。
+
+这不等于已经证明标签错误，因为同一时刻可能同时存在 ALT/AST 多项，且冻结 artifact 的历史
+排序选择不可逆；但它证明“冻结标签与当前确定性重建完全一致”不能成立。Code-10 前必须预先
+选择并冻结：保留 legacy cohort 并如实披露，或定义同时间多项合并规则后重建全部数据。不得以
+哪种方案性能更好作为选择标准。
+
+### 20.3 Code-09 strict early-warning
+
+旧实现把 inter-event delta 反向累加当成事件距 cutoff 的时间，只改变 medication/lab mask，
+没有清零当前 `x_med/x_lab/v_lab`，没有截断诊断，TextCNN 也会从被 mask 的卷积窗口读取值。
+Code-09 改为 Dataset 显式返回每个 med/lab/diagnosis event 到 `prediction_time` 的真实小时数，
+并对三模态统一执行：
+
+```text
+event_time < index_time - effective_horizon
+等价于
+event_age_to_prediction > effective_horizon - base_prediction_gap
+```
+
+当前模型数据已在 index time 前 24 h 截断，因此只能评估 effective 24/48/72 h。0 h 和 12 h
+所需的 24 h 以后事件已经不在 artifact 中，代码会拒绝这些 horizon，而不是假装重建。每个
+被截事件同步清零 mask、token、lab value、delta 和诊断 token；TextCNN 只池化全部 token 均
+可见的卷积窗口。evaluation 必须找到四个正式模型的全部五折 artifact，复用其中 test split
+与 temperature，并验证五折 test 恰好覆盖每个 encounter 一次；缺 artifact 不再跳过后生成
+不完整 CSV。
+
+最终真实运行 `code09-contract-audit-20260817-v2` **PASS（26.51 s）**，未加载 checkpoint、未训练、
+未估计性能：
+
+| Effective horizon | N / positive | Med events / missing encounters | Lab events / missing encounters | Diagnosis events / missing encounters |
+|---:|---:|---:|---:|---:|
+| 24 h | 46,864 / 391 | 1,111,860 / 0 | 283,723 / 6,998 | 215,543 / 2,745 |
+| 48 h | 46,864 / 391 | 870,670 / 10,902 | 219,257 / 16,320 | 168,273 / 12,582 |
+| 72 h | 46,864 / 391 | 682,260 / 18,986 | 169,350 / 23,455 | 131,732 / 20,323 |
+
+Figure 4 后续除 AUROC/AUPRC 及各自 CI 外，必须同时展示或附表报告这些 availability 数字。
+旧 0/24/48/72 性能不再属于当前方法。
+
+### 20.4 最低消融合同
+
+central registry 预注册六项矩阵：
+
+| Artifact name | Medication | Laboratory | Diagnosis | Continuous time encoding |
+|---|---:|---:|---:|---:|
+| `StaticDiagnosisOnly` | × | × | ✓ | × |
+| `MedicationOnly` | ✓ | × | × | ✓ |
+| `LaboratoryOnly` | × | ✓ | × | ✓ |
+| `FullWithoutTimeEncoding` | ✓ | ✓ | ✓ | × |
+| `FullWithoutDiagnosis` | ✓ | ✓ | × | ✓ |
+| `TimeAwareMultimodalTransformer` | ✓ | ✓ | ✓ | ✓ |
+
+这里没有 demographic tensor，因此第一项准确称为 static diagnosis-only，而不是虚构的
+demographic baseline。所有消融复用 `DILIPlusDataset` 九输入、同一 grouped split builder、
+单任务 AHI-proxy、unweighted focal 和 `[batch,2]` output。正式主模型只训练一次；运行
+`pipelines/02_train_models.py --run-id <id> --include-ablations` 时，五个 ablation-only 名称与
+四个正式架构比较模型进入同一 run，full primary 不会重复。
+
+真实格式合成 smoke 为 6/6 finite logits；禁用模态表示逐值为零；without-time 对任意 dt 改变
+保持完全相同输出。tracked manifests 为 `code09_early_warning_contract.json` 和
+`code09_minimum_ablation_contract.json`。这些只证明执行合同，不是消融性能结果。
+
+### 20.5 当前边界与下一步
+
+最终验证：
+
+| Recorded run | 结果 | 内容 |
+|---|---|---|
+| `code08-table1-20260817-v3` | **PASS，2.79 s** | 真实 46,864-row cohort、源 DuckDB schema/join、Table 1 与 aggregate manifest；patient profile 冲突值检查通过 |
+| `code09-contract-audit-20260817-v2` | **PASS，26.51 s** | 真实 horizon availability、物理 cutoff synthetic audit、6/6 minimum-ablation smoke |
+| `code08-code09-tests-20260817-v2` | **56/56 PASS，4.13 s** | 全套合同测试；新增 0-match/duplicate join、Table 1 missingness、三模态 cutoff、TextCNN mask、temporal metadata 和消融测试 |
+| `code08-code09-compileall-20260817-v2` | **PASS，0.14 s** | `src/`、`pipelines/`、`scripts/`、`tests/` 语法编译 |
+
+- 本轮没有修改论文仓库，没有生成新 AUROC/AUPRC、paired comparison 或 Figure 4。
+- Code-08 已生成可复核 Table 1，但在论文采用前要先冻结第 20.2 节标签并列项决策；随后逐格
+  同步 CSV，不得手工抄用旧表。
+- Code-09 的输入和训练入口已具备；performance CI、minimum-ablation paired comparison 和
+  Figure 4 属于 Code-10 唯一正式 run。
+- Code-10 前仍应提交当前代码/manifest 作为新 checkpoint，避免训练时 dirty implementation
+  无法精确引用。

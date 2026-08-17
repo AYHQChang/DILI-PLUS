@@ -240,6 +240,51 @@ class DatasetLabelContractTests(unittest.TestCase):
             ), self.assertRaisesRegex(KeyError, "label_ahi_proxy"):
                 DILIPlusDataset(root, root, 4, 3, 2)
 
+    def test_empty_modalities_have_zero_masks_and_temporal_ages_are_exact(self):
+        prediction = pd.Timestamp("2026-01-03 00:00:00")
+        med_lab = pd.DataFrame(
+            {
+                "encounter_id": ["p1_1"],
+                "label_ahi_proxy": [0],
+                "prediction_time": [prediction],
+                "prediction_gap_hours": [24.0],
+                "med_tokens": [["med"]],
+                "med_dt_hours": [[0.0]],
+                "med_event_times": [[prediction - pd.Timedelta(hours=30)]],
+                "lab_tokens": [[]],
+                "lab_values": [[]],
+                "lab_dt_hours": [[]],
+                "lab_event_times": [[]],
+            }
+        )
+        diagnoses = pd.DataFrame(
+            {
+                "encounter_id": ["p1_1"],
+                "icd_codes": [[]],
+                "diag_event_times": [[]],
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "vocab_polypharmacy.json").write_text(
+                json.dumps({"[PAD]": 0, "[UNK]": 1, "med": 2}), encoding="utf-8"
+            )
+            (root / "vocab_diagnosis.json").write_text(
+                json.dumps({"[PAD]": 0, "[UNK]": 1}), encoding="utf-8"
+            )
+            with patch(
+                "diliplus.data.dataset.pd.read_parquet",
+                side_effect=[med_lab, diagnoses],
+            ):
+                dataset = DILIPlusDataset(
+                    root, root, 4, 3, 2, include_temporal_metadata=True
+                )
+            sample = dataset[0]
+        self.assertEqual(sample["mask_lab"].tolist(), [0, 0, 0])
+        self.assertEqual(sample["mask_diag"].tolist(), [0, 0])
+        self.assertEqual(sample["age_med_hours"].tolist(), [30.0, 0.0, 0.0, 0.0])
+        self.assertEqual(float(sample["base_prediction_gap_hours"]), 24.0)
+
 
 if __name__ == "__main__":
     unittest.main()

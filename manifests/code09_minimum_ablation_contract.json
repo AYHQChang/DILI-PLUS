@@ -1,0 +1,127 @@
+{
+  "contract": "code09_minimum_ablation_v1",
+  "status": "PASS",
+  "matrix_order": [
+    "StaticDiagnosisOnly",
+    "MedicationOnly",
+    "LaboratoryOnly",
+    "FullWithoutTimeEncoding",
+    "FullWithoutDiagnosis",
+    "TimeAwareMultimodalTransformer"
+  ],
+  "models": [
+    {
+      "model_name": "StaticDiagnosisOnly",
+      "spec": {
+        "use_medication": false,
+        "use_laboratory": false,
+        "use_diagnosis": true,
+        "use_time_encoding": false
+      },
+      "logit_shape": [
+        2,
+        2
+      ],
+      "finite_logits": true,
+      "parameters": 7440002
+    },
+    {
+      "model_name": "MedicationOnly",
+      "spec": {
+        "use_medication": true,
+        "use_laboratory": false,
+        "use_diagnosis": false,
+        "use_time_encoding": true
+      },
+      "logit_shape": [
+        2,
+        2
+      ],
+      "finite_logits": true,
+      "parameters": 7440002
+    },
+    {
+      "model_name": "LaboratoryOnly",
+      "spec": {
+        "use_medication": false,
+        "use_laboratory": true,
+        "use_diagnosis": false,
+        "use_time_encoding": true
+      },
+      "logit_shape": [
+        2,
+        2
+      ],
+      "finite_logits": true,
+      "parameters": 7440002
+    },
+    {
+      "model_name": "FullWithoutTimeEncoding",
+      "spec": {
+        "use_medication": true,
+        "use_laboratory": true,
+        "use_diagnosis": true,
+        "use_time_encoding": false
+      },
+      "logit_shape": [
+        2,
+        2
+      ],
+      "finite_logits": true,
+      "parameters": 7440002
+    },
+    {
+      "model_name": "FullWithoutDiagnosis",
+      "spec": {
+        "use_medication": true,
+        "use_laboratory": true,
+        "use_diagnosis": false,
+        "use_time_encoding": true
+      },
+      "logit_shape": [
+        2,
+        2
+      ],
+      "finite_logits": true,
+      "parameters": 7440002
+    },
+    {
+      "model_name": "TimeAwareMultimodalTransformer",
+      "spec": {
+        "use_medication": true,
+        "use_laboratory": true,
+        "use_diagnosis": true,
+        "use_time_encoding": true
+      },
+      "logit_shape": [
+        2,
+        2
+      ],
+      "finite_logits": true,
+      "parameters": 7440002
+    }
+  ],
+  "shared_contract": {
+    "dataset": "DILIPlusDataset nine model-input tensors",
+    "target": "label_ahi_proxy",
+    "split_builder": "build_nested_grouped_splits",
+    "loss": "UnweightedFocalLoss(gamma=2; no class weighting)",
+    "output": "dict with finite logits [batch, 2]",
+    "full_model_trained_once": true,
+    "enable_training_with": "pipelines/02_train_models.py --include-ablations"
+  },
+  "no_time_delta_invariance": "PASS",
+  "source_sha256": {
+    "src/diliplus/models/registry.py": "2840CB1ABEFE558252F7757EFD4ADDA63C9DCFCD250B6054CC12B18483D644D5",
+    "src/diliplus/models/diliplus_engine.py": "F6E465CC71E333CBB62F29389D229D91FDAA4DDDF0B08AF32458C2437F041173",
+    "src/diliplus/models/baselines.py": "E7C96BFBB9E37C18226E4F69D695EFA2F10031E697681E261F3E297B05CB05E7",
+    "src/diliplus/data/dataset.py": "2C6227C45701D311228B40504D54C3E807258829AA6E0A95D917AA59030CFE03",
+    "src/diliplus/evaluation/early_warning.py": "CCC38905F477155B45D64971803C229BED51F1AB4F188CCD0BF1E6B3B6BA3E6F",
+    "src/diliplus/training/deep_trainer_calibrated.py": "8DE5B09A24C409F474352FFBB5D45790721482CF4CFA7C643DD8C64E0D79726B",
+    "src/diliplus/training/run_all_calibrated.py": "7BD8D1CB6E3533ED10ADB869E902A93A6B116EF2D75549E0736418C95E359F46",
+    "pipelines/02_train_models.py": "8E71442C5DD252D56A34366DB9A29949E583815F63C2266B991BBDC8A6AFDF6E"
+  },
+  "training_performed": false,
+  "performance_estimated": false,
+  "payload_sha256": "08420D2B8851D1FA9D313B2BCC03327E1668923D98578BEB26BE888709D01EAC"
+}

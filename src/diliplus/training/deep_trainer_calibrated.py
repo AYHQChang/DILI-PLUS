@@ -36,8 +36,9 @@ from diliplus.calibration import (
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
 from diliplus.models.registry import (
-    FORMAL_DEEP_MODEL_NAMES,
-    build_formal_deep_model,
+    DEEP_EXPERIMENT_NAMES,
+    build_deep_experiment_model,
+    experiment_spec,
     extract_ahi_proxy_logits,
 )
 from diliplus.reproducibility import (
@@ -215,7 +216,7 @@ def main(argv=None, settings=None):
         description="DILI-PLUS single-task AHI-proxy trainer"
     )
     parser.add_argument(
-        '--model', choices=FORMAL_DEEP_MODEL_NAMES, required=True
+        '--model', choices=DEEP_EXPERIMENT_NAMES, required=True
     )
     parser.add_argument('--epochs', type=int, default=settings.training.epochs)
     parser.add_argument('--batch_size', type=int, default=settings.training.batch_size)
@@ -273,6 +274,7 @@ def main(argv=None, settings=None):
             "diagnosis_modality_dropout_prob": (
                 settings.training.diagnosis_modality_dropout_prob
             ),
+            "model_input_spec": experiment_spec(args.model),
         },
     )
     
@@ -314,7 +316,7 @@ def main(argv=None, settings=None):
             num_workers=CONFIG["dataloader_num_workers"],
         )
 
-        model = build_formal_deep_model(
+        model = build_deep_experiment_model(
             args.model, vocab_config, settings.training
         ).to(device)
         

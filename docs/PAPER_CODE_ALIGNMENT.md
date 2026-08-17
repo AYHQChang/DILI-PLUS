@@ -313,7 +313,7 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 
 | 论文对象 | 生成代码/数据 | 当前状态 |
 |---|---|---|
-| Baseline Table | [`src/diliplus/reporting/table1.py`](../src/diliplus/reporting/table1.py) | 当前保存的 `Table_01_Baseline_Characteristics_DILIPLUS.txt` 只记录 `Query interrupted`；论文表中数值缺少成功的当前报告证据，必须重跑并逐项核对 |
+| Baseline Table | [`src/diliplus/reporting/table1.py`](../src/diliplus/reporting/table1.py) | Code-08 已成功生成 46,864 encounters / 46,844 patients 的机器可读表、论文格式表、join/schema/baseline audit 和 tracked manifest；论文采用前仍须冻结 legacy label 同时间并列项决策并逐格同步 |
 | Architecture Table | 手写在 `main.tex` | Code-07 后须同步正式新名称、from-scratch、128/2 层、单任务和无 alpha 的 loss 合同 |
 | Performance Table | `reports/05_Calibrated_Results_Table.csv` | 主要数值可追溯；正文存在一处 AUPRC 错写 |
 
@@ -347,16 +347,20 @@ pre-Code-07 历史报告中的 TA-MedBERT：
 
 72h AUPRC retention = `0.11277 / 0.90454 ≈ 12.5%`，现有 Figure 4 数值由此得到。
 
-但必须同时记录：
+修复前必须同时记录：
 
 1. 旧 Figure 4 的 `.pth` 不含温度，历史结果使用 raw softmax；新代码已要求版本化 artifact 和显式概率模式，但尚未正式重跑。
 2. TextCNN 不消费更新后的 mask，现有 CSV 中 TextCNN 0/24/48/72h 结果完全相同。正式图已把 TextCNN 排除，但 CSV 仍含无效结果。
-3. 当前代码只修改 mask，没有同步清零现行键名 `x_med/x_lab/v_lab`；Transformer/RNN 主要通过 mask 生效，但应统一为显式截断并写测试验证所有模型行为。
-4. 静态诊断已在 P0-03 限制为主任务 prediction time 前，但 early-warning 各 horizon 没有按更早 cutoff 重新截断诊断；长时距性能仍可能看到该 horizon 之后才可用的诊断。
+3. 修复前只修改 mask，没有同步清零现行键名 `x_med/x_lab/v_lab`。
+4. 修复前静态诊断没有按更早 horizon cutoff 重新截断。
 5. 0h 输入包含目标定义化验，不能称为无泄露预测基线。
 6. 72h AUROC 置信区间跨过 0.5（当前报告约 0.472–0.612），不能写成“statistically robust”而不做正式检验。
 
-在修复并重跑前，72h 结果最多表述为“时间遮蔽敏感性分析中仍观察到高于基线患病率的 AUPRC”，不能写“可用于预防性干预”或“已证明 72h 预警有效”。
+Code-09 已改为使用真实 event time 对 medication/laboratory/diagnosis 三模态同步物理截断，
+TextCNN 也只消费全部 token 均可见的卷积窗口；当前 24 h 模型数据只允许 effective
+24/48/72 h，0/12 h 不能从已截断 artifact 重建。真实 availability audit 已通过，但尚无
+Code-10 模型 artifact，因此没有修复后的性能和 Figure 4。在正式重跑前，旧 72 h 数字不能
+继续作为当前结果，更不能写“可用于预防性干预”或“已证明 72h 预警有效”。
 
 ## 10. 局部解释和扰动分析的真实含义
 
@@ -410,7 +414,7 @@ pre-Code-07 历史报告中的 TA-MedBERT：
 8. 修复早期预警遮蔽和温度参数复用后重跑 Figure 4；静态诊断时间界限已于 P0-03 完成。
 9. 让 Track B 真正读取经审核的 substitution map，或把论文改成“手工指定 token substitution sensitivity”。
 10. 全面删除“safe/actionable treatment guidance”“absolute risk reduction”“pathogenic/protective drug”等超出观察性模型能力的措辞。
-11. 成功重跑 Table 1；当前保存的正式报告是失败日志，论文数值不能算已复现。
+11. Code-08 已成功重跑 Table 1；论文尚未逐格同步，且 baseline ALT/AST 同时间并列项与冻结 legacy 标签的差异须在 Code-10 前决策。
 
 ### P1：提交前应处理
 
@@ -512,7 +516,7 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 ## 15. 当前建议的大修顺序
 
 1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split、版本化 artifact，以及 Code-07 模型/损失语义合同。
-2. 下一步完成 Code-08 cohort/Table 1 和 Code-09 early-warning/消融合同；Code-10 再执行唯一正式性能 run。
+2. Code-08 cohort/Table 1 和 Code-09 early-warning/消融合同已完成；先冻结 baseline ALT/AST 同时间并列项/legacy 标签决策，再由 Code-10 执行唯一正式性能 run。
 3. 论文后续统一采用 `TimeAwareMultimodalTransformer`/TA-MMT，并只保留当前实现和新实验真正支持的创新点。
 4. 用新结果重做 Table 1、Table 2、Figure 1b/1d/2/3/4。
 5. 把 Figure 5/6 降级为单病例模型审计，并改掉因果/治疗用语。
@@ -526,5 +530,6 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 | 2026-08-16 | `cb36322...` + dirty worktree hash 见 baseline manifest | 未修改 | 完成 Code-00/04：集中随机配置、5-seed pseudo-index 审计、两次完整数据重建、稳定事件/词表 tie-break、当前 grouped split 摘要和 aggregate-only manifest；21/21 tests PASS；未训练模型 |
 | 2026-08-16 | `cb36322...` + dirty worktree | 未修改 | 完成 Code-05/06：五折四方 patient-group split、selection/calibration 隔离、同一 test logits 配对 raw/calibrated、版本化 deep/sklearn artifact、run-specific 输出和下游 run/fold/mode/data guard；真实 split 与 artifact smoke PASS；未训练正式模型 |
 | 2026-08-17 | `2bfe6ef`（Checkpoint-01）；Code-07 建立于其上 | 未修改 | 冻结 Code-00--06 合同；完成 Code-07：正式模型改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`，旧名仅作 Python 导入兼容；单任务 AHI proxy、unweighted focal (`gamma=2`, no alpha/class weight)、无 AKI/MTL/tuple、逐样本 diagnosis-only dropout、from-scratch；共享配置强制有效 hidden/head 关系；44/44 tests、语义 audit 与 canonical artifact smoke PASS；未训练正式模型，pre-Code-07 结果继续仅作历史证据 |
+| 2026-08-17 | `d22a827` + Code-08/09 dirty worktree | 未修改 | Code-08 真实 Table 1 查询 PASS：46,864 encounters、46,844 patients、391 positives，所有 encounter-level join inflation=1，证实全院住院混合场景；Code-09 24/48/72 h 三模态 strict cutoff 与 6 项最低消融合同 PASS；未训练/未估计性能，baseline lab 并列项标签决策待冻结 |
 
 以后每次完成会改变论文结论的代码修改，都应在此表增加一行。

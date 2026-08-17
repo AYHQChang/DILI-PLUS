@@ -35,6 +35,9 @@ prediction:
   gap_hours: 24
   pseudo_index_seed: 20260816
   audit_horizons_hours: [0, 12, 24, 48, 72]
+  # The formal model artifact is already truncated 24 h before index_time.
+  # Horizons below 24 h cannot be reconstructed from that artifact.
+  early_warning_horizons_hours: [24, 48, 72]
 
 reproducibility:
   # Explicit component seeds prevent a plotting change from silently changing

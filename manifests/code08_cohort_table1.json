@@ -1,0 +1,132 @@
+{
+  "contract": "code08_cohort_table1_v1",
+  "cohort_anchor": "03_dili_dual_stream_tensors.parquet",
+  "label": "label_ahi_proxy",
+  "source_database_mode": "read_only",
+  "source_relations": {
+    "analysis.v_patient_encounters": [
+      "admit_date",
+      "dept_name",
+      "discharge_date",
+      "encounter_id",
+      "patient_id"
+    ],
+    "analysis.v_patient_profile": [
+      "birth_date",
+      "gender",
+      "patient_id"
+    ]
+  },
+  "join_key": "encounter_id (trimmed string equality)",
+  "summary": {
+    "encounters": 46864,
+    "unique_patients": 46844,
+    "encounters_without_patient_id": 0,
+    "patients_with_repeated_encounters": 20,
+    "repeated_encounters_above_one_per_patient": 20,
+    "age_nonmissing": 45639,
+    "sex_nonmissing": 45639,
+    "positive_encounters": 391,
+    "negative_encounters": 46473,
+    "prevalence_pct": 0.8343291225674292,
+    "prediction_gap_hours_min": 24.0,
+    "prediction_gap_hours_max": 24.0,
+    "icu_or_critical_care_encounters": 447,
+    "other_or_unknown_department_encounters": 46417,
+    "setting_interpretation": "hospital_wide_inpatient_cohort_with_department_mix"
+  },
+  "join_audit": [
+    {
+      "stage": "formal_cohort_to_time_bounded_diagnoses",
+      "left_rows": 46864,
+      "left_unique_encounters": 46864,
+      "right_rows": 46864,
+      "right_unique_encounters": 46864,
+      "output_rows": 46864,
+      "output_unique_encounters": 46864,
+      "matched_left_encounters": 46864,
+      "unmatched_left_encounters": 0,
+      "match_rate": 1.0,
+      "row_inflation": 1.0
+    },
+    {
+      "stage": "formal_cohort_to_encounter_dimension",
+      "left_rows": 46864,
+      "left_unique_encounters": 46864,
+      "right_rows": 46864,
+      "right_unique_encounters": 46864,
+      "output_rows": 46864,
+      "output_unique_encounters": 46864,
+      "matched_left_encounters": 46864,
+      "unmatched_left_encounters": 0,
+      "match_rate": 1.0,
+      "row_inflation": 1.0
+    },
+    {
+      "stage": "encounter_patient_to_patient_profile",
+      "left_rows": 46864,
+      "left_unique_encounters": 46864,
+      "right_rows": 45619,
+      "right_unique_encounters": null,
+      "output_rows": 46864,
+      "output_unique_encounters": 46864,
+      "matched_left_encounters": 45639,
+      "unmatched_left_encounters": 1225,
+      "match_rate": 0.9738605326049846,
+      "row_inflation": 1.0
+    },
+    {
+      "stage": "formal_cohort_to_aligned_baseline_labs",
+      "left_rows": 46864,
+      "left_unique_encounters": 46864,
+      "right_rows": 46864,
+      "right_unique_encounters": 46864,
+      "output_rows": 46864,
+      "output_unique_encounters": 46864,
+      "matched_left_encounters": 46864,
+      "unmatched_left_encounters": 0,
+      "match_rate": 1.0,
+      "row_inflation": 1.0
+    }
+  ],
+  "baseline_label_audit": [
+    {
+      "group": "AHI-proxy negative",
+      "encounters": 46473,
+      "baseline_status_nonmissing": 46473,
+      "baseline_status_normal_or_low": 45260,
+      "baseline_numeric_nonmissing": 46473,
+      "baseline_numeric_ge_120": 0,
+      "normal_or_low_status_but_numeric_ge_120": 0
+    },
+    {
+      "group": "AHI-proxy positive",
+      "encounters": 391,
+      "baseline_status_nonmissing": 391,
+      "baseline_status_normal_or_low": 362,
+      "baseline_numeric_nonmissing": 391,
+      "baseline_numeric_ge_120": 5,
+      "normal_or_low_status_but_numeric_ge_120": 0
+    }
+  ],
+  "input_sha256": {
+    "03_dili_dual_stream_tensors.parquet": "9B22E55549A179E9439F8FEA749D6B7C90BF62686E754E04AFC0E22EB79A1E42",
+    "03b_diag_tensors.parquet": "72EC45E24A795C53ABD1C38D69880A12D2D15F16E776B1ECC6FBA9C3F29F4B52",
+    "01_aligned_dili_labs.parquet": "B7A7CEE9E2A20D29318DE0BA2AAC2F1CE36465D953A6D894FE8FEE32E246BF7B"
+  },
+  "output_sha256": {
+    "table1_characteristics.csv": "D4698E07AE4AFF960F16B5C85835950D7AACA0E0486543198DCC3A4A95F14140",
+    "table1_paper.txt": "F4BD358B06643BF9AE6BC15AFEF38358A7424EFE15F32D06A5F336E1D4109E8E",
+    "cohort_summary.csv": "9EB10FB8368E59B0ADEB1B8228FEE436F00C1BB80B03F62434C96E2BFFA11689",
+    "department_distribution.csv": "B69CDC568BEF12440D2AA1C194567BD1DE6B447226E19F4F8E699A8DA18734EA",
+    "join_audit.csv": "1CCE9F7A89B003670427485C3EE394F3002D7E89D7B321010A057D5780A24FB5",
+    "baseline_label_audit.csv": "D2DC67568C1C4209E2CBA80A2EB9E8EB448022984FDC2A055D437C3FF887A75C",
+    "source_schema_contract.csv": "A96AE194FAD13C9993B189DC7D00E9797E556AB4948504F74392082F48881445"
+  },
+  "limitations": [
+    "The frozen AHI-proxy cohort is preserved from the pre-Code-02 label artifact.",
+    "The aligned laboratory cache was originally linked through the source patient identifier; Table 1 does not re-link the raw laboratory table.",
+    "Diagnosis flags describe records available before prediction_time, not causal comorbid effects.",
+    "The department screen is descriptive and does not validate a dedicated ICU cohort."
+  ]
+}

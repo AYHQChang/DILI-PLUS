@@ -96,6 +96,7 @@ class PredictionSettings:
     gap_hours: float = 24.0
     pseudo_index_seed: int = 20260816
     audit_horizons_hours: tuple[float, ...] = (0.0, 12.0, 24.0, 48.0, 72.0)
+    early_warning_horizons_hours: tuple[float, ...] = (24.0, 48.0, 72.0)
 
     def __post_init__(self) -> None:
         if self.gap_hours < 0:
@@ -104,6 +105,17 @@ class PredictionSettings:
             raise ValueError("prediction.audit_horizons_hours must not be empty")
         if any(hours < 0 for hours in self.audit_horizons_hours):
             raise ValueError("prediction audit horizons must be non-negative")
+        if not self.early_warning_horizons_hours:
+            raise ValueError("prediction.early_warning_horizons_hours must not be empty")
+        if any(hours < self.gap_hours for hours in self.early_warning_horizons_hours):
+            raise ValueError(
+                "early-warning horizons cannot be earlier than the model-data "
+                "prediction gap because later events are absent from the artifact"
+            )
+        if tuple(sorted(set(self.early_warning_horizons_hours))) != tuple(
+            self.early_warning_horizons_hours
+        ):
+            raise ValueError("early-warning horizons must be unique and increasing")
 
 
 @dataclass(frozen=True)
@@ -206,6 +218,16 @@ class Settings:
         return self.paths.reports / "p0_04_reproducibility"
 
     @property
+    def cohort_table1_dir(self) -> Path:
+        """Local-only Code-08 cohort and Table 1 evidence."""
+        return self.paths.reports / "p0_08_cohort_table1"
+
+    @property
+    def early_warning_audit_dir(self) -> Path:
+        """Local-only Code-09 horizon-contract evidence."""
+        return self.paths.reports / "p0_09_early_warning"
+
+    @property
     def baseline_manifest_path(self) -> Path:
         return self.paths.manifests / "code00_code04_baseline.json"
 
@@ -255,6 +277,12 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
                 float(value)
                 for value in prediction.get(
                     "audit_horizons_hours", [0.0, 12.0, 24.0, 48.0, 72.0]
+                )
+            ),
+            early_warning_horizons_hours=tuple(
+                float(value)
+                for value in prediction.get(
+                    "early_warning_horizons_hours", [24.0, 48.0, 72.0]
                 )
             ),
         ),

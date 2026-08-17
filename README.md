@@ -9,10 +9,10 @@ DILI-PLUS 是一个面向住院多重用药场景的 DILI 风险建模项目。�
 ```powershell
 conda activate ML311
 python pipelines/01_build_dataset.py
-python pipelines/02_train_models.py --run-id dili24h_v1
+python pipelines/02_train_models.py --run-id dili24h_v1 --include-ablations
 python pipelines/03_evaluate_models.py --run-id dili24h_v1 --probability-mode calibrated
 python pipelines/04_explain_models.py --run-id dili24h_v1 --probability-mode calibrated --fold 1
-python pipelines/05_build_paper_assets.py
+python pipelines/05_build_paper_assets.py --stages table_1
 ```
 
 全部入口均接受 `--config configs/default.yaml`。项目刻意不提供默认“一键跑完”命令，以避免误触发数据库提取、长时间训练或批量覆盖图片。
@@ -35,14 +35,22 @@ python pipelines/01_build_dataset.py --stages diagnoses diagnosis_audit vocabula
 `reports/p0_02_prediction_gap_24h/` 保存时序泄漏审计。诊断通过同次住院桥连接，仅保留
 `diagnosis create_time < prediction_time` 的记录，并在
 `reports/p0_03_diagnosis_time_gap_24h/` 保存源审计和最终 Parquet 契约审计。旧模型和旧预测
-结果不能与修复后数据混用。Code-05/06 已完成分层划分、校准和 artifact 协议修复；在
-Code-08/09 完成 cohort、early-warning 和最低消融合同，并进入 Code-10 的唯一正式 run 前，
-仍不应启动或引用正式性能重训。
+结果不能与修复后数据混用。Code-05/06 已完成分层划分、校准和 artifact 协议修复；Code-08
+已成功重建 cohort/Table 1，Code-09 已完成 strict early-warning 和最低消融执行合同。进入
+Code-10 唯一正式 run 前，仍须冻结 Code-08 暴露的 baseline ALT/AST 同时间并列项与 legacy
+标签处理决策；当前仍不应引用任何旧性能作为修复后结果。
 
 需要在 VS Code 中看到完整执行过程时，使用 `Terminal -> Run Task`。当前提供诊断构建、
 Code-00/04 确定性重建、Code-04 pseudo-index 敏感性、Code-05 真实 split 审计、Code-06
-artifact smoke、Code-07 模型/损失语义审计和 recorded unit tests。命令
-输出会同步保存为 `reports/run_logs/<run-id>.log`，同名 JSON 记录命令、commit、dirty 状态、
+artifact smoke、Code-07 模型/损失语义审计和 recorded unit tests。Code-08/09 可用下列命令
+留下相同格式的终端与日志记录：
+
+```powershell
+python scripts/run_recorded.py --run-id code08_table1_local -- python pipelines/05_build_paper_assets.py --stages table_1
+python scripts/run_recorded.py --run-id code09_contracts_local -- python scripts/audit_code09_contracts.py
+```
+
+这些命令的输出会同步保存为 `reports/run_logs/<run-id>.log`，同名 JSON 记录命令、commit、dirty 状态、
 process seed、起止时间、退出码和日志哈希。
 
 ## 可复现性与基线
@@ -106,6 +114,21 @@ dropout 按样本只清零诊断表示；不会连带缩放药物或化验表示
 pre-Code-07 checkpoint、预测、表格和图片仍是历史证据，不能因名称清理而升级为当前结果。
 可提交的 aggregate-only 语义证据位于 `manifests/code07_model_loss_contract.json`；审计只用
 固定合成输入在 CPU 验证结构，不读取患者数据、不训练，也不计算性能指标。
+
+## Cohort、Table 1 与 early-warning/消融合同
+
+Code-08 以修复后的 `03_dili_dual_stream_tensors.parquet` 为唯一 cohort anchor；诊断、住院维表、
+patient profile 和 aligned baseline labs 逐阶段连接。每一步验证 schema、one-row-per-encounter、
+匹配数和 row inflation，0 匹配或 N 改变会直接失败。真实结果为 46,864 encounters、46,844
+unique patients、391 positives；完整 aggregate 证据见 `manifests/code08_cohort_table1.json`，
+通用排错流程见 DuckDB playbook 第 9.7 节。
+
+Code-09 使用每个事件到 prediction time 的真实时距，同时截断并清零 medication、laboratory
+和 diagnosis 输入。由于正式数据已经在 index time 前 24 h 截断，当前只允许 effective
+24/48/72 h，不能从现有 artifact 伪造 0/12 h 输入。最低消融矩阵包含 static diagnosis-only、
+medication-only、laboratory-only、full without time、full without diagnosis 和 full primary；
+只有显式传入 `--include-ablations` 才会在正式 run 中训练五个 ablation-only 模型。Code-09
+tracked manifests 只证明输入和结构合同，不含训练或性能结果。
 
 ## 目录职责
 

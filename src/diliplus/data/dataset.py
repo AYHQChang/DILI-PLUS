@@ -14,7 +14,15 @@ import numpy as np
 from torch.utils.data import Dataset
 
 class DILIPlusDataset(Dataset):
-    def __init__(self, data_dir, vocab_dir, max_med_len=100, max_lab_len=20, max_diag_len=15):
+    def __init__(
+        self,
+        data_dir,
+        vocab_dir,
+        max_med_len=100,
+        max_lab_len=20,
+        max_diag_len=15,
+        include_temporal_metadata=False,
+    ):
         # 1. 读取词表
         with open(os.path.join(vocab_dir, "vocab_polypharmacy.json"), 'r', encoding='utf-8') as f:
             self.med_vocab = json.load(f)
@@ -27,7 +35,17 @@ class DILIPlusDataset(Dataset):
         df_diag = pd.read_parquet(os.path.join(data_dir, "03b_diag_tensors.parquet"))
         
         # 使用 Left Join 保证队列完整性
-        self.data = pd.merge(df_med_lab, df_diag, on='encounter_id', how='left')
+        if df_med_lab['encounter_id'].duplicated().any():
+            raise ValueError("Dynamic model artifact must contain one row per encounter")
+        if df_diag['encounter_id'].duplicated().any():
+            raise ValueError("Diagnosis artifact must contain one row per encounter")
+        self.data = pd.merge(
+            df_med_lab,
+            df_diag,
+            on='encounter_id',
+            how='left',
+            validate='one_to_one',
+        )
         # Formal Code-07 inputs must expose the scientifically accurate label
         # name. Silently accepting legacy-only artifacts would allow old data
         # semantics to enter a new run under a canonical model name.
@@ -38,6 +56,20 @@ class DILIPlusDataset(Dataset):
                 "legacy-only 'label_dili' artifacts must be rebuilt"
             )
         self.labels = self.data[self.label_column].values
+        self.include_temporal_metadata = bool(include_temporal_metadata)
+        if self.include_temporal_metadata:
+            required_temporal = {
+                'prediction_time',
+                'prediction_gap_hours',
+                'med_event_times',
+                'lab_event_times',
+                'diag_event_times',
+            }
+            missing = sorted(required_temporal - set(self.data.columns))
+            if missing:
+                raise KeyError(
+                    f"Early-warning dataset is missing temporal columns: {missing}"
+                )
         
         # 预设截断长度 (可根据 VRAM 调整)
         self.max_med_len = max_med_len
@@ -49,7 +81,7 @@ class DILIPlusDataset(Dataset):
         
     def _encode_tokens(self, tokens, vocab, max_len):
         if not isinstance(tokens, (list, np.ndarray)) or len(tokens) == 0:
-            return [0], 1 # 空列表给个 [PAD]
+            return [], 0
         seq = [vocab.get(t, vocab.get('[UNK]', 1)) for t in tokens][:max_len]
         return seq, len(seq)
         
@@ -64,20 +96,42 @@ class DILIPlusDataset(Dataset):
             return list(val)
         return []
 
+    def _event_age_hours(self, event_times, prediction_time, expected_len, max_len):
+        times = self._safe_list(event_times)
+        if len(times) != expected_len:
+            raise ValueError(
+                "Token/event-time length mismatch in early-warning input: "
+                f"tokens={expected_len}, times={len(times)}"
+            )
+        if not times:
+            return []
+        parsed = pd.to_datetime(times, errors='coerce')
+        prediction = pd.Timestamp(prediction_time)
+        ages = (prediction - parsed).total_seconds() / 3600.0
+        ages = np.asarray(ages, dtype=np.float64)
+        if not np.isfinite(ages).all() or not np.all(ages > 0):
+            raise ValueError(
+                "All early-warning event timestamps must be finite and strictly "
+                "earlier than prediction_time"
+            )
+        return ages[:max_len].tolist()
+
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
         
         # ---------------------------------------------------------
         # Stream A: Med 流
         # ---------------------------------------------------------
-        med_seq, med_len = self._encode_tokens(row.get('med_tokens', []), self.med_vocab, self.max_med_len)
+        raw_med = self._safe_list(row.get('med_tokens', []))
+        med_seq, med_len = self._encode_tokens(raw_med, self.med_vocab, self.max_med_len)
         med_dt = self._safe_list(row.get('med_dt_hours', []))
         dt_med = med_dt[:self.max_med_len] if len(med_dt) > 0 else [0.0]
         
         # ---------------------------------------------------------
         # Stream B: Lab 流 (异构三元组)
         # ---------------------------------------------------------
-        lab_seq, lab_len = self._encode_tokens(row.get('lab_tokens', []), self.med_vocab, self.max_lab_len)
+        raw_lab = self._safe_list(row.get('lab_tokens', []))
+        lab_seq, lab_len = self._encode_tokens(raw_lab, self.med_vocab, self.max_lab_len)
         lab_v = self._safe_list(row.get('lab_values', []))
         v_lab = lab_v[:self.max_lab_len] if len(lab_v) > 0 else [0.0]
         lab_dt = self._safe_list(row.get('lab_dt_hours', []))
@@ -86,10 +140,11 @@ class DILIPlusDataset(Dataset):
         # ---------------------------------------------------------
         # Stream C: Diag 流
         # ---------------------------------------------------------
-        diag_seq, diag_len = self._encode_tokens(row.get('icd_codes', []), self.diag_vocab, self.max_diag_len)
+        raw_diag = self._safe_list(row.get('icd_codes', []))
+        diag_seq, diag_len = self._encode_tokens(raw_diag, self.diag_vocab, self.max_diag_len)
         
         # 拼装返回字典
-        return {
+        sample = {
             'x_med': torch.tensor(self._pad_seq(med_seq, self.max_med_len, 0), dtype=torch.long),
             'dt_med': torch.tensor(self._pad_seq(dt_med, self.max_med_len, 0.0), dtype=torch.float),
             'mask_med': torch.tensor(self._pad_seq([1]*med_len, self.max_med_len, 0), dtype=torch.long),
@@ -106,6 +161,45 @@ class DILIPlusDataset(Dataset):
             # Short compatibility alias for generic training utilities.
             'label': torch.tensor(self.labels[idx], dtype=torch.long)
         }
+        if self.include_temporal_metadata:
+            age_med = self._event_age_hours(
+                row.get('med_event_times', []),
+                row['prediction_time'],
+                len(raw_med),
+                self.max_med_len,
+            )
+            age_lab = self._event_age_hours(
+                row.get('lab_event_times', []),
+                row['prediction_time'],
+                len(raw_lab),
+                self.max_lab_len,
+            )
+            age_diag = self._event_age_hours(
+                row.get('diag_event_times', []),
+                row['prediction_time'],
+                len(raw_diag),
+                self.max_diag_len,
+            )
+            sample.update(
+                {
+                    'age_med_hours': torch.tensor(
+                        self._pad_seq(age_med, self.max_med_len, 0.0),
+                        dtype=torch.float,
+                    ),
+                    'age_lab_hours': torch.tensor(
+                        self._pad_seq(age_lab, self.max_lab_len, 0.0),
+                        dtype=torch.float,
+                    ),
+                    'age_diag_hours': torch.tensor(
+                        self._pad_seq(age_diag, self.max_diag_len, 0.0),
+                        dtype=torch.float,
+                    ),
+                    'base_prediction_gap_hours': torch.tensor(
+                        float(row['prediction_gap_hours']), dtype=torch.float
+                    ),
+                }
+            )
+        return sample
 
 def load_vocab_sizes(vocab_dir):
     """读取词表维度，喂给模型初始化"""

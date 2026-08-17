@@ -130,6 +130,50 @@
       }
     },
     {
+      "label": "DILI-PLUS: Code-08 cohort + Table 1",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code08_table1_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\pipelines\\05_build_paper_assets.py",
+        "--stages",
+        "table_1"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: Code-09 early-warning + ablation audit",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code09_contracts_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\audit_code09_contracts.py"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "DILI-PLUS: recorded unit tests",
       "type": "process",
       "command": "D:\\Anaconda\\envs\\ML311\\python.exe",

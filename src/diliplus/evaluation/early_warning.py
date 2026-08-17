@@ -1,27 +1,31 @@
-"""
-DILI-PLUS | DILI 提前预警时间窗评估（包实现）
+"""Code-09 strict early-warning evaluation.
 
-职责：在五折测试集上遮蔽序列终点前 0、24、48、72 小时的动态事件，比较四种
-深度模型的 AUROC、AUPRC、校准与决策曲线指标随预警时间的变化。
-输入：DILIPlusDataset 和指定 run ID 的版本化模型 artifact。
-输出：reports/06a_Early_Warning_Decay_Results.csv。
-状态：当前 DILI 单任务的时间窗敏感性评估脚本。
-实现边界：调用方必须显式选择 raw 或 calibrated 概率；TextCNN 与逐 horizon 诊断/动态
-截断仍需在 Code-09 修正后再解释。
+The model data are already censored ``gap_hours`` before each encounter's index
+time. An effective horizon therefore must be at least that base gap. Additional
+cutoff is performed from retained event timestamps, never reconstructed from
+inter-event deltas. Medication, laboratory and diagnosis tensors are all
+physically zeroed together with their masks.
 """
 
-import os
-import torch
+from __future__ import annotations
+
+import json
+
 import numpy as np
 import pandas as pd
-import warnings
-from sklearn.metrics import average_precision_score, roc_auc_score, brier_score_loss, roc_curve
+import torch
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    roc_auc_score,
+)
 from torch.utils.data import DataLoader, Subset
 
 from diliplus.artifacts import (
     artifact_probabilities,
     dataset_fingerprint,
     deep_artifact_path,
+    file_sha256,
     load_deep_artifact,
 )
 from diliplus.config import load_settings
@@ -33,162 +37,321 @@ from diliplus.models.registry import (
 )
 from diliplus.reproducibility import DEFAULT_SEED, derive_seed, seed_everything
 
-warnings.filterwarnings("ignore")
 
-# =============================================================================
-# 与训练结果表一致的评估指标
-# =============================================================================
-def calculate_partial_auc(y_true, y_prob, fpr_limit=0.2):
-    fpr, tpr, _ = roc_curve(y_true, y_prob)
-    if fpr_limit <= 0 or fpr_limit > 1: return 0.0
-    valid_idx = np.where(fpr <= fpr_limit)[0]
-    if len(valid_idx) < 2: return 0.0
-    fpr_part, tpr_part = fpr[valid_idx], tpr[valid_idx]
-    if fpr_part[-1] < fpr_limit:
-        idx_next = valid_idx[-1] + 1
-        if idx_next < len(fpr):
-            slope = (tpr[idx_next] - tpr_part[-1]) / (fpr[idx_next] - fpr_part[-1] + 1e-9)
-            tpr_interp = tpr_part[-1] + slope * (fpr_limit - fpr_part[-1])
-            fpr_part = np.append(fpr_part, fpr_limit)
-            tpr_part = np.append(tpr_part, tpr_interp)
-    # 🔥 已经为您替换为 Numpy 2.0 强制要求的 trapezoid
-    return np.trapezoid(tpr_part, fpr_part) / (fpr_limit * 1.0) 
+MODEL_INPUT_KEYS = (
+    "x_med",
+    "dt_med",
+    "mask_med",
+    "x_lab",
+    "v_lab",
+    "dt_lab",
+    "mask_lab",
+    "x_diag",
+    "mask_diag",
+)
+MODALITY_CONTRACT = {
+    "medication": {
+        "mask": "mask_med",
+        "age": "age_med_hours",
+        "zero": ("x_med", "dt_med", "age_med_hours"),
+    },
+    "laboratory": {
+        "mask": "mask_lab",
+        "age": "age_lab_hours",
+        "zero": ("x_lab", "v_lab", "dt_lab", "age_lab_hours"),
+    },
+    "diagnosis": {
+        "mask": "mask_diag",
+        "age": "age_diag_hours",
+        "zero": ("x_diag", "age_diag_hours"),
+    },
+}
 
-def calculate_net_benefit(y_true, y_prob, thresholds=np.arange(0.01, 1.0, 0.01)):
-    net_benefits = []
-    n = len(y_true)
-    if n == 0: return 0.0
-    for pt in thresholds:
-        preds = (y_prob >= pt).astype(int)
-        tp = np.sum((preds == 1) & (y_true == 1))
-        fp = np.sum((preds == 1) & (y_true == 0))
-        nb = (tp / n) - (fp / n) * (pt / (1 - pt))
-        net_benefits.append(nb)
-    # 🔥 已经为您替换为 Numpy 2.0 强制要求的 trapezoid
-    return np.trapezoid(np.maximum(net_benefits, 0), thresholds)
 
-def calculate_quantile_ece(y_true, y_prob, n_bins=10):
-    try:
-        bins = np.quantile(y_prob, np.linspace(0, 1, n_bins + 1))
-        bins[-1] += 1e-8 
-        binids = np.digitize(y_prob, bins) - 1
-    except:
-        bins = np.linspace(0, 1, n_bins + 1)
-        binids = np.digitize(y_prob, bins) - 1
-    ece = 0.0
-    for i in range(n_bins):
-        bin_idx = binids == i
-        if np.sum(bin_idx) > 0:
-            prob_mean = np.mean(y_prob[bin_idx])
-            acc_mean = np.mean(y_true[bin_idx])
-            ece += (np.sum(bin_idx) / len(y_prob)) * np.abs(prob_mean - acc_mean)
-    return ece
+def validate_effective_horizons(horizons, base_gap_hours: float) -> tuple[float, ...]:
+    values = tuple(float(value) for value in horizons)
+    if not values:
+        raise ValueError("At least one early-warning horizon is required")
+    if tuple(sorted(set(values))) != values:
+        raise ValueError("Early-warning horizons must be unique and increasing")
+    invalid = [value for value in values if value < float(base_gap_hours)]
+    if invalid:
+        raise ValueError(
+            f"Effective horizons {invalid} are below the {base_gap_hours:g} h base "
+            "prediction gap; their later events are absent and cannot be reconstructed"
+        )
+    return values
 
-def calculate_sci_metrics_with_ci(
-    y_true, y_prob, n_bootstraps=1000, bootstrap_seed=DEFAULT_SEED
-):
-    y_true, y_prob = np.array(y_true), np.array(y_prob)
+
+def apply_effective_horizon_cutoff(
+    batch: dict[str, torch.Tensor],
+    effective_horizon_hours: float,
+    base_gap_hours: float,
+) -> tuple[dict[str, torch.Tensor], dict[str, int]]:
+    """Return a cloned, physically truncated batch and aggregate retained counts."""
+    if float(effective_horizon_hours) < float(base_gap_hours):
+        raise ValueError("effective horizon cannot be below the model-data base gap")
+    additional_hours = float(effective_horizon_hours) - float(base_gap_hours)
+    output = {
+        key: value.clone() if torch.is_tensor(value) else value
+        for key, value in batch.items()
+    }
+    audit = {}
+    for modality, contract in MODALITY_CONTRACT.items():
+        mask_key = contract["mask"]
+        age_key = contract["age"]
+        if mask_key not in output or age_key not in output:
+            raise KeyError(
+                f"Early-warning batch lacks {mask_key!r} or {age_key!r} for {modality}"
+            )
+        original_mask = output[mask_key].bool()
+        ages = output[age_key]
+        if torch.any(original_mask & (~torch.isfinite(ages) | (ages <= 0))):
+            raise ValueError(
+                f"Active {modality} events must have finite positive age-to-prediction"
+            )
+        retained = original_mask & (ages > additional_hours)
+
+        # Events are sorted chronologically, so retained events must be a prefix.
+        invalid_reentry = retained & ((~retained).cumsum(dim=1) > 0)
+        if torch.any(invalid_reentry):
+            raise ValueError(f"{modality} event times are not chronologically ordered")
+
+        output[mask_key] = retained.to(output[mask_key].dtype)
+        for key in contract["zero"]:
+            output[key] = output[key] * retained.to(output[key].dtype)
+        lengths = retained.sum(dim=1)
+        audit[f"{modality}_events_retained"] = int(lengths.sum().item())
+        audit[f"{modality}_missing_encounters"] = int(lengths.eq(0).sum().item())
+    audit["encounters"] = int(next(iter(batch.values())).shape[0])
+    return output, audit
+
+
+def _metric_summary(y_true, y_prob, *, bootstrap_seed=DEFAULT_SEED, n_bootstraps=1000):
+    y_true = np.asarray(y_true, dtype=np.int64)
+    y_prob = np.asarray(y_prob, dtype=np.float64)
+    if len(y_true) == 0 or set(np.unique(y_true)) != {0, 1}:
+        raise ValueError("Early-warning metrics require nonempty binary outcomes")
     auroc = roc_auc_score(y_true, y_prob)
     auprc = average_precision_score(y_true, y_prob)
-    brier = brier_score_loss(y_true, y_prob)
-    ece = calculate_quantile_ece(y_true, y_prob)
-    pauc = calculate_partial_auc(y_true, y_prob)
-    audc = calculate_net_benefit(y_true, y_prob)
-    
     rng = np.random.default_rng(bootstrap_seed)
-    bootstrapped_auroc = []
-    for _ in range(n_bootstraps):
-        indices = rng.integers(0, len(y_prob), len(y_prob))
-        if len(np.unique(y_true[indices])) < 2: continue
-        bootstrapped_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
-        
-    ci_lower = np.percentile(bootstrapped_auroc, 2.5) if bootstrapped_auroc else auroc
-    ci_upper = np.percentile(bootstrapped_auroc, 97.5) if bootstrapped_auroc else auroc
-
+    boot_auroc, boot_auprc = [], []
+    for _ in range(int(n_bootstraps)):
+        indices = rng.integers(0, len(y_true), len(y_true))
+        if len(np.unique(y_true[indices])) < 2:
+            continue
+        boot_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
+        boot_auprc.append(average_precision_score(y_true[indices], y_prob[indices]))
     return {
-        "AUROC": auroc, "AUROC_95CI_Lower": ci_lower, "AUROC_95CI_Upper": ci_upper,
-        "AUPRC": auprc, "Brier": brier, "Quantile_ECE": ece, "pAUC_0.2": pauc, "NetBenefit_AUDC": audc
+        "AUROC": float(auroc),
+        "AUROC_95CI_Lower": float(np.percentile(boot_auroc, 2.5)),
+        "AUROC_95CI_Upper": float(np.percentile(boot_auroc, 97.5)),
+        "AUPRC": float(auprc),
+        "AUPRC_95CI_Lower": float(np.percentile(boot_auprc, 2.5)),
+        "AUPRC_95CI_Upper": float(np.percentile(boot_auprc, 97.5)),
+        "Brier": float(brier_score_loss(y_true, y_prob)),
     }
 
-# =============================================================================
-# 🌟 核心引擎：物理时间截断器 (Temporal Masking Engine)
-# =============================================================================
-def apply_temporal_mask(mask, dt, lead_time_hours):
-    """
-    通过张量翻转和累加，计算每个 Token 距离终点的物理时间。
-    将距离终点在 lead_time_hours 之内的事件强制致盲，实现真实的“提前预警”。
-    """
-    if lead_time_hours == 0:
-        return mask
-    
-    # 将时间差反转，从最后一个事件向回累加计算距今时间
-    dt_flipped = torch.flip(dt, dims=[1])
-    cum_time_from_end = torch.cumsum(dt_flipped, dim=1)
-    cum_time_from_end = torch.flip(cum_time_from_end, dims=[1])
-    
-    # 只允许“发生时间距离终点 > 预警窗口”的事件可见
-    valid_time_mask = cum_time_from_end >= lead_time_hours
-    return mask & valid_time_mask
 
-# =============================================================================
-# 🌟 模型预警评估管线
-# =============================================================================
+def build_horizon_availability(
+    dataset: DILIPlusDataset,
+    horizons,
+    *,
+    base_gap_hours: float,
+    batch_size: int = 512,
+) -> pd.DataFrame:
+    """Describe real cohort/event availability without loading any model artifact."""
+    horizons = validate_effective_horizons(horizons, base_gap_hours)
+    accumulators = {
+        horizon: {
+            "labels": [],
+            **{f"{modality}_lengths": [] for modality in MODALITY_CONTRACT},
+        }
+        for horizon in horizons
+    }
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    for batch in loader:
+        observed_gaps = batch["base_prediction_gap_hours"].numpy()
+        if not np.allclose(observed_gaps, base_gap_hours):
+            raise ValueError("Model artifact mixes prediction-gap values")
+        labels = batch["label_ahi_proxy"].numpy()
+        for horizon in horizons:
+            truncated, _ = apply_effective_horizon_cutoff(
+                batch, horizon, base_gap_hours
+            )
+            accumulators[horizon]["labels"].extend(labels.tolist())
+            for modality, contract in MODALITY_CONTRACT.items():
+                lengths = truncated[contract["mask"]].sum(dim=1).numpy()
+                accumulators[horizon][f"{modality}_lengths"].extend(lengths.tolist())
+
+    rows = []
+    for horizon in horizons:
+        labels = np.asarray(accumulators[horizon]["labels"], dtype=np.int64)
+        row = {
+            "base_prediction_gap_hours": float(base_gap_hours),
+            "effective_horizon_hours_before_index": float(horizon),
+            "additional_cutoff_hours_before_prediction": float(horizon - base_gap_hours),
+            "encounters": int(len(labels)),
+            "positive_encounters": int(labels.sum()),
+            "negative_encounters": int(len(labels) - labels.sum()),
+            "prevalence_pct": float(100.0 * labels.mean()),
+        }
+        for modality in MODALITY_CONTRACT:
+            lengths = np.asarray(
+                accumulators[horizon][f"{modality}_lengths"], dtype=np.int64
+            )
+            row.update(
+                {
+                    f"{modality}_events_retained": int(lengths.sum()),
+                    f"{modality}_missing_encounters": int((lengths == 0).sum()),
+                    f"{modality}_length_median": float(np.median(lengths)),
+                    f"{modality}_length_q1": float(np.percentile(lengths, 25)),
+                    f"{modality}_length_q3": float(np.percentile(lengths, 75)),
+                }
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _synthetic_cutoff_audit(base_gap_hours: float) -> dict:
+    batch = {
+        "x_med": torch.tensor([[2, 3, 4]]),
+        "dt_med": torch.tensor([[0.0, 5.0, 5.0]]),
+        "mask_med": torch.tensor([[1, 1, 1]]),
+        "age_med_hours": torch.tensor([[30.0, 20.0, 5.0]]),
+        "x_lab": torch.tensor([[5, 6, 0]]),
+        "v_lab": torch.tensor([[10.0, 20.0, 0.0]]),
+        "dt_lab": torch.tensor([[0.0, 8.0, 0.0]]),
+        "mask_lab": torch.tensor([[1, 1, 0]]),
+        "age_lab_hours": torch.tensor([[26.0, 8.0, 0.0]]),
+        "x_diag": torch.tensor([[7, 8, 0]]),
+        "mask_diag": torch.tensor([[1, 1, 0]]),
+        "age_diag_hours": torch.tensor([[40.0, 10.0, 0.0]]),
+    }
+    horizon = float(base_gap_hours) + 24.0
+    truncated, audit = apply_effective_horizon_cutoff(batch, horizon, base_gap_hours)
+    expected_masks = {
+        "mask_med": [[1, 0, 0]],
+        "mask_lab": [[1, 0, 0]],
+        "mask_diag": [[1, 0, 0]],
+    }
+    for key, expected in expected_masks.items():
+        if truncated[key].tolist() != expected:
+            raise AssertionError(f"Synthetic strict-cutoff audit failed for {key}")
+    for key in ("x_med", "dt_med", "x_lab", "v_lab", "dt_lab", "x_diag"):
+        mask_key = "mask_med" if "med" in key else ("mask_lab" if "lab" in key else "mask_diag")
+        if torch.any(truncated[key][truncated[mask_key] == 0] != 0):
+            raise AssertionError(f"Synthetic physical-zero audit failed for {key}")
+    return {
+        "status": "PASS",
+        "effective_horizon_hours": horizon,
+        "boundary_rule": "event_age_to_prediction > effective_horizon - base_gap",
+        **audit,
+    }
+
+
+def audit_early_warning_contract(settings=None) -> Path:
+    """Run Code-09 data/cutoff audits without training or estimating performance."""
+    settings = settings or load_settings()
+    seed_everything(settings.reproducibility)
+    output_dir = settings.early_warning_audit_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dataset = DILIPlusDataset(
+        settings.model_data_dir,
+        settings.paths.vocab,
+        include_temporal_metadata=True,
+    )
+    horizons = validate_effective_horizons(
+        settings.prediction.early_warning_horizons_hours,
+        settings.prediction.gap_hours,
+    )
+    availability = build_horizon_availability(
+        dataset,
+        horizons,
+        base_gap_hours=settings.prediction.gap_hours,
+        batch_size=settings.training.batch_size,
+    )
+    csv_path = output_dir / "horizon_availability.csv"
+    availability.to_csv(csv_path, index=False)
+    synthetic = _synthetic_cutoff_audit(settings.prediction.gap_hours)
+
+    manifest_path = settings.paths.manifests / "code09_early_warning_contract.json"
+    manifest = {
+        "contract": "code09_strict_early_warning_v1",
+        "status": "PASS",
+        "base_prediction_gap_hours": settings.prediction.gap_hours,
+        "effective_horizons_hours": list(horizons),
+        "unsupported_horizons_below_base_gap": (
+            "cannot be reconstructed from already-censored model artifacts"
+        ),
+        "cutoff_rule": "event_time < index_time - effective_horizon",
+        "implemented_as": (
+            "event_age_to_prediction > effective_horizon - base_prediction_gap"
+        ),
+        "modalities_physically_zeroed": {
+            modality: list(contract["zero"])
+            for modality, contract in MODALITY_CONTRACT.items()
+        },
+        "horizon_availability": availability.to_dict(orient="records"),
+        "synthetic_cutoff_audit": synthetic,
+        "input_sha256": {
+            path.name: file_sha256(path)
+            for path in (
+                settings.model_data_dir / "03_dili_dual_stream_tensors.parquet",
+                settings.model_data_dir / "03b_diag_tensors.parquet",
+            )
+        },
+        "output_sha256": {csv_path.name: file_sha256(csv_path)},
+        "performance_estimated": False,
+        "training_performed": False,
+    }
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("[DILI-PLUS][Code-09] Strict temporal cutoff audit PASS")
+    print(availability.to_string(index=False))
+    print(f"[DILI-PLUS][Code-09] Aggregate manifest: {manifest_path}")
+    return manifest_path
+
+
 @torch.no_grad()
-def evaluate_lead_time_single_fold(
+def _predict_horizon_single_fold(
     model,
     dataloader,
     device,
-    lead_time_hours,
+    *,
+    effective_horizon_hours,
+    base_gap_hours,
     artifact_metadata,
     probability_mode,
-    bootstrap_seed=DEFAULT_SEED,
 ):
     model.eval()
-    all_preds, all_labels = [], []
-    
+    predictions, labels = [], []
     for batch in dataloader:
-        inputs = {k: v.to(device) for k, v in batch.items() if 'label' not in k}
-        labels = batch.get('label_ahi_proxy', batch.get('label')).to(device)
-        
-        # 根据预警窗口更新动态序列掩码
-        if lead_time_hours > 0:
-            # 1. 截断注意力掩码
-            valid_mask_med = apply_temporal_mask(inputs['mask_med'], inputs['dt_med'], lead_time_hours)
-            valid_mask_lab = apply_temporal_mask(inputs['mask_lab'], inputs['dt_lab'], lead_time_hours)
-            
-            inputs['mask_med'] = valid_mask_med
-            inputs['mask_lab'] = valid_mask_lab
-            
-            # 2. 旧版输入键兼容分支；现行数据集使用 x_med/x_lab/v_lab 键，
-            # 因而本段不会为 TextCNN 清零实际特征，后续逻辑修正时需要对齐键名。
-            # 将被截断的离散 Token 替换为 0 (通常 0 是 PAD token)
-            if 'med' in inputs:
-                inputs['med'] = inputs['med'] * valid_mask_med.long()
-            if 'lab' in inputs:
-                inputs['lab'] = inputs['lab'] * valid_mask_lab.long()
-                
-            # 对旧版 lab_val 键同步应用掩码
-            if 'lab_val' in inputs:
-                # 扩展掩码以匹配最后一个维度 (如 lab_val 为 3D)
-                extended_mask_lab = valid_mask_lab.unsqueeze(-1) if inputs['lab_val'].dim() > valid_mask_lab.dim() else valid_mask_lab
-                inputs['lab_val'] = inputs['lab_val'] * extended_mask_lab.float()
-            
-        outputs = model(**inputs)
-        
-        logits = extract_ahi_proxy_logits(outputs)
-            
-        probs = artifact_probabilities(
+        truncated, _ = apply_effective_horizon_cutoff(
+            batch, effective_horizon_hours, base_gap_hours
+        )
+        inputs = {key: truncated[key].to(device) for key in MODEL_INPUT_KEYS}
+        logits = extract_ahi_proxy_logits(model(**inputs))
+        probabilities = artifact_probabilities(
             logits.detach().cpu(), artifact_metadata, probability_mode
         )
-        all_preds.extend(probs)
-        all_labels.extend(labels.cpu().numpy())
-        
-    return calculate_sci_metrics_with_ci(
-        all_labels,
-        all_preds,
-        n_bootstraps=500,
-        bootstrap_seed=bootstrap_seed,
-    )
+        predictions.extend(np.asarray(probabilities).tolist())
+        labels.extend(batch["label_ahi_proxy"].numpy().tolist())
+    return labels, predictions
+
+
+def _require_complete_artifacts(settings, run_id: str) -> None:
+    missing = [
+        str(deep_artifact_path(settings, run_id, model_name, fold))
+        for model_name in FORMAL_DEEP_MODEL_NAMES
+        for fold in range(1, settings.evaluation_protocol.outer_folds + 1)
+        if not deep_artifact_path(settings, run_id, model_name, fold).exists()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "Early-warning evaluation requires every formal model/fold artifact; "
+            f"missing {len(missing)} files, first={missing[0]}"
+        )
+
 
 def main(settings=None, run_id=None, probability_mode="calibrated"):
     settings = settings or load_settings()
@@ -197,103 +360,110 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
     if probability_mode not in ("raw", "calibrated"):
         raise ValueError("probability_mode must be 'raw' or 'calibrated'")
     seed_everything(settings.reproducibility)
-    data_dir = str(settings.model_data_dir)
-    vocab_dir = str(settings.paths.vocab)
-    report_dir = str(settings.paths.reports)
-    os.makedirs(report_dir, exist_ok=True)
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🚀 Booting DILIPLUS Early Warning Simulator | Device: {device}")
-    
-    vocab_config = load_vocab_sizes(vocab_dir)
-    full_dataset = DILIPlusDataset(data_dir, vocab_dir)
-    
-    current_fingerprint = dataset_fingerprint(settings)["payload_sha256"]
+    _require_complete_artifacts(settings, run_id)
+    audit_early_warning_contract(settings)
 
-    models_to_evaluate = FORMAL_DEEP_MODEL_NAMES
-    
-    lookahead_windows = [0, 24, 48, 72] # 预警窗口：即刻、提前1天、2天、3天
-    all_results = []
-    
-    for model_name in models_to_evaluate:
-        print(f"\n{'='*60}\n⏳ Evaluating Decay for: {model_name}\n{'='*60}")
-        
-        for lead_time in lookahead_windows:
-            fold_metrics = []
-            
-            # 执行 5 折全局评估
-            for fold in range(1, settings.evaluation_protocol.outer_folds + 1):
-                artifact_path = deep_artifact_path(settings, run_id, model_name, fold)
-                if not artifact_path.exists():
-                    print(f"   Fold {fold} artifact not found, skipping...")
-                    continue
-                
-                model = build_formal_deep_model(
-                    model_name, vocab_config, settings.training
-                ).to(device)
-                metadata = load_deep_artifact(
-                    artifact_path,
-                    model,
-                    map_location=device,
-                    expected_run_id=run_id,
-                    expected_model_name=model_name,
-                    expected_fold=fold,
-                    expected_dataset_fingerprint=current_fingerprint,
-                )
-                test_idx = metadata["split"]["indices"]["test"]
-                test_loader = DataLoader(
-                    Subset(full_dataset, test_idx),
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset = DILIPlusDataset(
+        settings.model_data_dir,
+        settings.paths.vocab,
+        include_temporal_metadata=True,
+    )
+    vocab_sizes = load_vocab_sizes(settings.paths.vocab)
+    fingerprint = dataset_fingerprint(settings)["payload_sha256"]
+    horizons = validate_effective_horizons(
+        settings.prediction.early_warning_horizons_hours,
+        settings.prediction.gap_hours,
+    )
+    results = []
+    reference_test_indices = None
+
+    for model_name in FORMAL_DEEP_MODEL_NAMES:
+        fold_payloads = []
+        for fold in range(1, settings.evaluation_protocol.outer_folds + 1):
+            model = build_formal_deep_model(
+                model_name, vocab_sizes, settings.training
+            ).to(device)
+            metadata = load_deep_artifact(
+                deep_artifact_path(settings, run_id, model_name, fold),
+                model,
+                map_location=device,
+                expected_run_id=run_id,
+                expected_model_name=model_name,
+                expected_fold=fold,
+                expected_dataset_fingerprint=fingerprint,
+            )
+            test_indices = list(map(int, metadata["split"]["indices"]["test"]))
+            fold_payloads.append((model, metadata, test_indices))
+        flattened = [index for _, _, indices in fold_payloads for index in indices]
+        if len(flattened) != len(set(flattened)) or set(flattened) != set(range(len(dataset))):
+            raise RuntimeError(
+                f"{model_name} outer-test folds must cover each encounter exactly once"
+            )
+        if reference_test_indices is None:
+            reference_test_indices = [tuple(item[2]) for item in fold_payloads]
+        elif reference_test_indices != [tuple(item[2]) for item in fold_payloads]:
+            raise RuntimeError("Formal models do not share identical outer-test splits")
+
+        for horizon in horizons:
+            pooled_labels, pooled_predictions = [], []
+            for model, metadata, test_indices in fold_payloads:
+                loader = DataLoader(
+                    Subset(dataset, test_indices),
                     batch_size=settings.training.batch_size,
                     shuffle=False,
                     num_workers=settings.reproducibility.dataloader_num_workers,
                 )
-                
-                metrics = evaluate_lead_time_single_fold(
+                labels, predictions = _predict_horizon_single_fold(
                     model,
-                    test_loader,
+                    loader,
                     device,
-                    lead_time,
-                    metadata,
-                    probability_mode,
-                    bootstrap_seed=derive_seed(
-                        settings.reproducibility.bootstrap_seed,
-                        model_name,
-                        fold,
-                        lead_time,
-                    ),
+                    effective_horizon_hours=horizon,
+                    base_gap_hours=settings.prediction.gap_hours,
+                    artifact_metadata=metadata,
+                    probability_mode=probability_mode,
                 )
-                fold_metrics.append(metrics)
-            
-            if len(fold_metrics) == 0:
-                continue
-                
-            # 汇总 5 折均值
-            avg_metrics = {k: np.mean([m[k] for m in fold_metrics]) for k in fold_metrics[0].keys()}
-            avg_metrics['Model_Architecture'] = model_name
-            avg_metrics['Lead_Time_Hours'] = lead_time
-            avg_metrics['Run_ID'] = run_id
-            avg_metrics['Probability_Mode'] = probability_mode
-            all_results.append(avg_metrics)
-            
-            print(f"   🕒 {lead_time:>2}h Ahead | Avg AUROC: {avg_metrics['AUROC']:.4f} | Avg AUPRC: {avg_metrics['AUPRC']:.4f}")
+                pooled_labels.extend(labels)
+                pooled_predictions.extend(predictions)
+            metrics = _metric_summary(
+                pooled_labels,
+                pooled_predictions,
+                bootstrap_seed=derive_seed(
+                    settings.reproducibility.bootstrap_seed,
+                    model_name,
+                    horizon,
+                    probability_mode,
+                ),
+            )
+            metrics.update(
+                {
+                    "Run_ID": run_id,
+                    "Probability_Mode": probability_mode,
+                    "Model_Architecture": model_name,
+                    "Base_Prediction_Gap_Hours": settings.prediction.gap_hours,
+                    "Effective_Horizon_Hours_Before_Index": horizon,
+                    "N": len(pooled_labels),
+                    "Positive_N": int(np.sum(pooled_labels)),
+                    "Prevalence": float(np.mean(pooled_labels)),
+                }
+            )
+            results.append(metrics)
+            print(
+                f"[DILI-PLUS][Code-09] {model_name} {horizon:g} h: "
+                f"AUROC={metrics['AUROC']:.4f}, AUPRC={metrics['AUPRC']:.4f}"
+            )
 
-    # 保存预警衰减结果矩阵
-    df_results = pd.DataFrame(all_results)
-    
-    # 调整列序美观
-    cols = ['Run_ID', 'Probability_Mode', 'Model_Architecture', 'Lead_Time_Hours', 'AUROC', 'AUROC_95CI_Lower', 'AUROC_95CI_Upper',
-            'AUPRC', 'Quantile_ECE', 'pAUC_0.2', 'NetBenefit_AUDC', 'Brier']
-    df_results = df_results[[c for c in cols if c in df_results.columns]]
-    
-    out_path = os.path.join(
-        report_dir,
-        "runs",
-        run_id,
-        f"06a_Early_Warning_Decay_Results_{probability_mode}.csv",
+    report_path = (
+        settings.paths.reports
+        / "runs"
+        / run_id
+        / f"06a_Early_Warning_Strict_{probability_mode}.csv"
     )
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    df_results.to_csv(out_path, index=False)
-    print(f"\n✅ All Decay Simulations Completed! Data saved to: {out_path}")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(results).to_csv(report_path, index=False)
+    print(f"[DILI-PLUS][Code-09] Strict early-warning results: {report_path}")
+    return report_path
+
 
 if __name__ == "__main__":
     main()

@@ -204,7 +204,13 @@ def _resource_table(metric_frames: list[pd.DataFrame]) -> pd.DataFrame:
     )
 
 
-def finalize_formal_run(settings, run_id: str, model_names) -> dict:
+def finalize_formal_run(
+    settings,
+    run_id: str,
+    model_names,
+    *,
+    analysis_kind: str = "six_model_primary",
+) -> dict:
     model_names = tuple(model_names)
     if PRIMARY_MODEL_NAME not in model_names:
         raise ValueError("Formal finalization requires the primary model")
@@ -328,6 +334,7 @@ def finalize_formal_run(settings, run_id: str, model_names) -> dict:
         "status": "COMPLETE",
         "run_id": run_id,
         "run_kind": "formal",
+        "analysis_kind": analysis_kind,
         "git_commit": _git("rev-parse", "HEAD"),
         "training_git_commit": _training_commit(settings, run_id),
         "analysis_git_commit": _git("rev-parse", "HEAD"),
@@ -381,7 +388,12 @@ def finalize_formal_run(settings, run_id: str, model_names) -> dict:
     local_manifest.write_text(
         json.dumps(tracked_payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    tracked_manifest = settings.paths.manifests / "code10_formal_run.json"
+    tracked_filename = (
+        "code10_formal_run.json"
+        if analysis_kind == "six_model_primary"
+        else f"{run_id}_run.json"
+    )
+    tracked_manifest = settings.paths.manifests / tracked_filename
     tracked_manifest.write_text(
         json.dumps(tracked_payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )

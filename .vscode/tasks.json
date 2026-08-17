@@ -265,6 +265,38 @@
         "panel": "shared",
         "clear": true
       }
+    },
+    {
+      "label": "DILI-PLUS: Code-10 128d/8-head sensitivity",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code10_sensitivity_128d8h_seed0",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\run_code10_deep_subset.py",
+        "--run-id",
+        "code10_sensitivity_128d8h_seed0",
+        "--config",
+        "${workspaceFolder}\\configs\\sensitivity_128d_8heads.yaml",
+        "--analysis-kind",
+        "architecture_sensitivity",
+        "--seed-index",
+        "0",
+        "--models",
+        "MultimodalTransformerBaseline",
+        "TimeAwareMultimodalTransformer"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
     }
   ]
 }

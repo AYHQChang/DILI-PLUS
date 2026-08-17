@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "contract": "code10_formal_experiment_v1",
+  "status": "PASS",
+  "git_commit_before_contract_checkpoint": "6ef982c6d3807166233c0b6e01bf414865be919a",
+  "formal_label_source": "deterministic_rebuild",
+  "legacy_label_scope": "pipeline_pilot_only",
+  "target": "single-task biochemical AHI proxy; no causal DILI attribution",
+  "formal_models": [
+    {
+      "name": "MultiModalTextCNN",
+      "parameters": 4880000,
+      "trainable_parameters": 4880000,
+      "from_scratch": true
+    },
+    {
+      "name": "MultiModalBiLSTM",
+      "parameters": 5088642,
+      "trainable_parameters": 5088642,
+      "from_scratch": true
+    },
+    {
+      "name": "MultimodalTransformerBaseline",
+      "parameters": 6569730,
+      "trainable_parameters": 6569730,
+      "from_scratch": true
+    },
+    {
+      "name": "TimeAwareMultimodalTransformer",
+      "parameters": 7246594,
+      "trainable_parameters": 7246594,
+      "from_scratch": true
+    },
+    {
+      "name": "LogisticRegression",
+      "model_family": "traditional_machine_learning"
+    },
+    {
+      "name": "XGBoost",
+      "model_family": "traditional_machine_learning"
+    }
+  ],
+  "primary_model": "TimeAwareMultimodalTransformer",
+  "architecture": {
+    "primary_hidden_size": 128,
+    "primary_attention_heads": 4,
+    "sensitivity_hidden_size": 128,
+    "sensitivity_attention_heads": 8
+  },
+  "optimization": {
+    "epochs_max": 50,
+    "batch_size": 256,
+    "learning_rate": 0.0001,
+    "weight_decay": 1e-05,
+    "loss": "UnweightedFocalLoss",
+    "focal_gamma": 2.0,
+    "class_or_sample_weighting": "none",
+    "selection_metric": "AUPRC",
+    "early_stopping_patience": 7
+  },
+  "evaluation": {
+    "outer_folds": 5,
+    "split_roles": [
+      "training",
+      "selection",
+      "calibration",
+      "test"
+    ],
+    "patient_group_source": "analysis.v_patient_encounters.patient_id",
+    "bootstrap_unit": "patient_id cluster",
+    "bootstrap_replicates": 1000,
+    "p_auc_fpr_limits": [
+      0.05,
+      0.1,
+      0.2
+    ],
+    "risk_thresholds": [
+      0.005,
+      0.01,
+      0.02,
+      0.05
+    ],
+    "alert_budgets": [
+      0.005,
+      0.01,
+      0.02,
+      0.05
+    ],
+    "holm_adjusted_paired_comparisons": true
+  },
+  "prespecified_sequence": [
+    "six-model single-seed five-fold primary run",
+    "128d/8-head architecture sensitivity",
+    "primary plus strongest deep comparator three-seed stability",
+    "minimum ablation and early-warning evaluation"
+  ],
+  "split_manifest_payload_sha256": "19EF1FD9C4F969A2EC827C53CC7479893FD886E77D9580FC629DF0A6BC4CE073",
+  "dataset_fingerprint": {
+    "files": {
+      "data_cache/prediction_gap_24h/data_lineage.json": {
+        "bytes": 1356,
+        "sha256": "C9550F155F3A44D8AB448C1BBED2038C06405495B6C30A45D64006415441BD96"
+      },
+      "data_cache/prediction_gap_24h/02_dili_labels_censored.parquet": {
+        "bytes": 1341482,
+        "sha256": "0C930193EF891A1E0DF3C16B921BCAC3F4CE9608E58028CEC165527D16BD1616"
+      },
+      "data_cache/prediction_gap_24h/03_dili_dual_stream_tensors.parquet": {
+        "bytes": 5618664,
+        "sha256": "DAD06F96EC6AA5CFD8370796AD8F7EF3C3EAFEBB15A25B2451B34F0305480510"
+      },
+      "data_cache/prediction_gap_24h/03b_diag_tensors.parquet": {
+        "bytes": 1330618,
+        "sha256": "C1FC0D5F5B8DEE1DA0AD90281E837A3E8B126A3323BB96B098CBB1C88976BF66"
+      },
+      "vocab/vocab_polypharmacy.json": {
+        "bytes": 680345,
+        "sha256": "D95EECF85C58628A47A42EB001CAB32762F2B6B6277826D490FE9051E806F1BC"
+      },
+      "vocab/vocab_diagnosis.json": {
+        "bytes": 106730,
+        "sha256": "75AA8B94973894D18DEA63880C5D37F36D3F250B7480CE0AA70F45AA6BDCB5AD"
+      }
+    },
+    "payload_sha256": "4771048A90EFDDED14BD42F239E6254B5F53AB6A0BD0A9475B7EF59F54E6F6EA"
+  },
+  "vocab_sizes": {
+    "vocab_med_size": 15969,
+    "vocab_lab_size": 15969,
+    "vocab_diag_size": 4971
+  },
+  "source_sha256": {
+    "configs/default.yaml": "5BE8A87256C518746AA7DBCFDDBC87E1B19CB0550CFE0DB411E389CB65DB85C5",
+    "configs/pilot_legacy.yaml": "4FACEAF45BDB9D4E16253C5A59BCD695EB05BF7E20EC1278B040AC91B5E67402",
+    "configs/sensitivity_128d_8heads.yaml": "B0A841BCF0D21E5800BBBEF047449A5683D370CA051473ABE6CCBDAE2365D534",
+    "pipelines/02_train_models.py": "F5FFE2989C8D2A37EFCD53B865ECA2FC39F0808F68086904EB4D9C07B0444BAE",
+    "src/diliplus/config.py": "6BF788B0DD06EAB91BBCE6B953EB808CA3A6F05D482609BA0415A37B5A473BB5",
+    "src/diliplus/data/labels.py": "73F398338ECDD9583207E8B51EAB6B26728D66953AF9E8F9095E833500FE5268",
+    "src/diliplus/data/lineage.py": "044E34E05F27E2D41186DB38B0B39B532B31A729D7C482B653EF296DF2C2AF09",
+    "src/diliplus/splits.py": "EE54B84DD6137ACBA57275FEEB2F6BF6853DCA03CA3A3F7124EEAAFB676B8519",
+    "src/diliplus/models/registry.py": "2840CB1ABEFE558252F7757EFD4ADDA63C9DCFCD250B6054CC12B18483D644D5",
+    "src/diliplus/training/losses.py": "F70EC2CA4C56E53724AE9EA390EFD55801F69D9457D3A9C7F272A14A4FF643E7",
+    "src/diliplus/training/deep_trainer_calibrated.py": "6DCFA406ABB0BA20D2F26FCD367F7BAB69900A9457D617BBAA3B8C214C383A44",
+    "src/diliplus/training/ml_baselines_calibrated.py": "7618EF991D7C05D0E0CF1C4AB5C61D5B67687EB93004EF877F98B56FF2BB2744",
+    "src/diliplus/training/run_all_calibrated.py": "67A29D5DAD6674E56C6A0147803E246FA4CECC34319CB5E4E7D0BC5247AD3A9C",
+    "src/diliplus/evaluation/metrics.py": "BB490C77CA30482F244A8162992506B4A1BF7D467728CFEFDB2ACE99C4863417",
+    "src/diliplus/evaluation/finalize.py": "DAA3D8524CE70EB52809A3648709E0EE8F0F39EFBE2C89BCFE887D8AE84CE5BE"
+  },
+  "privacy": "aggregate counts, parameter counts and hashes only; no row identifiers",
+  "training_performed": false,
+  "performance_estimated": false,
+  "payload_sha256": "8E09F1F64B04A7FC5DD1FBF27DF2C49026DE510E67BCFAC6DC7191FC60741A6D"
+}

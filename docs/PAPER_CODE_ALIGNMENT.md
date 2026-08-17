@@ -92,8 +92,8 @@
 正式实现：[`src/diliplus/data/labels.py`](../src/diliplus/data/labels.py)
 
 - 仅使用名称匹配到 ALT/AST 的化验。
-- 每次住院的第一次相关化验以 `abnormal_status` 判断基线，而不是用数值 ULN 统一重算。
-- 基线状态必须属于正常/低值集合。
+- 每次住院最早 ALT/AST 时间戳的全部同行共同定义基线，不能从并列行中任取一行。
+- 基线每行状态必须属于正常/低值集合，且全部可用数值均须 `<120 U/L`。
 - 后续任一 ALT 或 AST 数值 `>= 120 U/L` 定义正式列 `label_ahi_proxy = 1`；构建器暂时额外写出同值的 `label_dili` 兼容别名。
 - 首次达到 120 U/L 的时间定义为 `t_onset`。
 - 当前主任务固定 `prediction_gap = 24h`；阳性 `index_time=t_onset`，`prediction_time=t_onset-24h`。
@@ -104,7 +104,9 @@ Code-07 后，正式 Dataset/训练接口强制要求 `label_ahi_proxy`，并把
 为同一 AHI-proxy 标签；只有 `label_dili` 的旧 Parquet 会被拒绝。因此论文中应使用
 “biochemistry-defined acute hepatic injury proxy”或“AHI proxy”，不是经过临床判定的 DILI。
 
-修复后 24h 数据单独写入 `data_cache/prediction_gap_24h/`，当前为 46,864 encounters、391 AHI-proxy positives。旧 0h/onset-time 数据、checkpoint 和结果不得与该版本混用。
+Code-10 确定性重建后的 24h 数据单独写入 `data_cache/prediction_gap_24h/`，当前为
+44,631 encounters、315 AHI-proxy positives。旧 0h/onset-time 数据、Code-02 冻结标签数据、
+checkpoint 和结果不得与该版本混用。
 
 ### 3.3 动态药物与化验序列
 
@@ -114,7 +116,7 @@ Code-07 后，正式 Dataset/训练接口强制要求 `label_ahi_proxy`，并把
 - 独立 Parquet 审计确认用药越界、化验越界和输入内 ALT/AST `>=120 U/L` 均为 0。
 - 输出：`data_cache/prediction_gap_24h/03_dili_dual_stream_tensors.parquet`。
 
-当前本地张量快照：46,864 行；391 阳性、46,473 阴性。
+当前正式张量快照：44,631 行；315 阳性、44,316 阴性。
 
 ### 3.4 诊断表型和目标致盲
 
@@ -123,23 +125,25 @@ Code-07 后，正式 Dataset/训练接口强制要求 `label_ahi_proxy`，并把
 - 精确连接路径为 `encounter_id -> visit_number -> business_uu -> inpatient_f`；不再使用患者号取回诊断。
 - 仅保留源行 `create_time` 可解析且严格满足 `diagnosis_time < prediction_time` 的诊断。
 - 排除 ICD-10 `K71%` 及中文“药物性肝”“毒性肝”“中毒性肝”标签；无时间和边界后诊断不插补。
-- 修复前审计发现 30.71% 的同次住院去重诊断位于 prediction time 当时或之后；修复后 216,220 条保留诊断的时间、显式目标和 encounter 对齐违规均为 0。
+- 修复前审计发现 30.71% 的同次住院去重诊断位于 prediction time 当时或之后；确定性正式
+  队列中 205,194 条保留诊断的时间、显式目标和 encounter 对齐违规均为 0。
 - `create_time` 只代表数据库记录可用时间代理，不代表疾病发生时间；论文必须保留这一限制，并且后续完成 without-diagnosis 消融。
 
 输出：`data_cache/prediction_gap_24h/03b_diag_tensors.parquet`；详细审计见 `docs/REVISION_ROADMAP_PEER_REVIEW.md` 第 16 节。
 
 ### 3.5 患者级分组核验
 
-训练器使用 `encounter_id` 下划线前缀作为 patient group。以下数量是 Code-02 以前 51,316 行
-快照的历史核验，不是当前 46,864 行 prediction-gap 队列的性能证据：
+旧训练器曾使用 `encounter_id` 下划线前缀作为 patient group。以下数量是 Code-02 以前
+51,316 行快照的历史核验，不是当前正式队列的切分证据：
 
 - 51,316 次住院记录。
 - 51,295 个唯一分组/患者号。
 - 21 名患者各有重复住院，共 42 次重复患者住院记录。
 - 分组前缀与队列中的 `health_reco` 完全一致。
 
-Code-05 已对当前 46,864 行队列重新建立五折 `StratifiedGroupKFold`，并自动证明每折四方角色的
-patient-group overlap 为 0。若将来更换数据编码规则，必须重新验证这一等价关系，不能只相信变量名。
+Code-10 已把源表 `analysis.v_patient_encounters.patient_id` 写入正式 tensor，并对当前 44,631 行
+队列重新建立五折 `StratifiedGroupKFold`；每折四方角色的 patient-group overlap 均为 0，五个
+outer-test 折恰好覆盖全部样本。正式路径禁止从 encounter 字符串推断 patient。
 
 ## 4. 模型真实结构
 
@@ -205,7 +209,7 @@ registry、训练 CLI、正式流水线生成的新 artifact 和报告标签不�
 `MultimodalTransformerBaseline`、`TimeAwareMultimodalTransformer`。后四个深度模型名由
 `src/diliplus/models/registry.py` 的 formal registry 集中限定；旧 MedBERT 名不属于正式实验键。
 
-Code-05 后，外层使用固定 seed 的 5 折 `StratifiedGroupKFold`。每个 outer-training pool 按 patient group 分成约 70% parameter-training、15% selection、15% calibration；内层从 128 个确定性 `GroupShuffleSplit` 候选中选择同时含两类且规模/患病率最接近母集的方案。selection 只用于早停/模型选择，calibration 只拟合温度，outer test 只生成一次最终 logits。真实 46,864 条队列的全部 index/group overlap 为 0，证据见 `manifests/code05_split_protocol.json`。
+Code-05 后，外层使用固定 seed 的 5 折 `StratifiedGroupKFold`。每个 outer-training pool 按 patient group 分成约 70% parameter-training、15% selection、15% calibration；内层从 128 个确定性 `GroupShuffleSplit` 候选中选择同时含两类且规模/患病率最接近母集的方案。selection 只用于早停/模型选择，calibration 只拟合温度，outer test 只生成一次最终 logits。Code-10 正式 44,631 条队列的全部 index/group overlap 为 0，group 是源表真实 `patient_id`，证据见 `manifests/code05_split_protocol.json`。
 
 ### 5.2 当前训练是显式单任务 AHI-proxy 分类
 
@@ -286,7 +290,7 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 
 | 论文位置 | 论文主张 | 代码/产物 | 审计结论 |
 |---|---|---|---|
-| Abstract | 51,316、507、0.99% | 旧 `03_dili_dual_stream_tensors.parquet` | C，pre-Code-02/07 历史快照可追溯；当前 24h 队列为 46,864/391，最终数字须正式重跑 |
+| Abstract | 51,316、507、0.99% | 旧 `03_dili_dual_stream_tensors.parquet` | C，pre-Code-02/07 历史快照可追溯；Code-10 正式队列为 44,631/315，论文须同步 |
 | Abstract | 右删失消除 immortal time bias | `data/labels.py` | B/D，已实现固定 seed 的确定性 pseudo-index 并完成 5-seed 事件密度审计，但不能宣称“消除”偏倚 |
 | Abstract | 双流药物 + 连续生理信号 | `data/sequences.py`、`models/diliplus_engine.py` | A，但还有第三诊断模态 |
 | Abstract | AUPRC 0.7389 | `05_Calibrated_Results_Table.csv` | C，pre-Code-07 历史结果可追溯，但修复后须重跑 |
@@ -313,7 +317,7 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 
 | 论文对象 | 生成代码/数据 | 当前状态 |
 |---|---|---|
-| Baseline Table | [`src/diliplus/reporting/table1.py`](../src/diliplus/reporting/table1.py) | Code-08 已成功生成 46,864 encounters / 46,844 patients 的机器可读表、论文格式表、join/schema/baseline audit 和 tracked manifest；论文采用前仍须冻结 legacy label 同时间并列项决策并逐格同步 |
+| Baseline Table | [`src/diliplus/reporting/table1.py`](../src/diliplus/reporting/table1.py) | Code-10 确定性正式队列已生成 44,631 encounters / 44,611 patients 的机器可读表、论文格式表、join/schema/baseline audit 和 tracked manifest；论文仍须逐格同步 |
 | Architecture Table | 手写在 `main.tex` | Code-07 后须同步正式新名称、from-scratch、128/2 层、单任务和无 alpha 的 loss 合同 |
 | Performance Table | `reports/05_Calibrated_Results_Table.csv` | 主要数值可追溯；正文存在一处 AUPRC 错写 |
 
@@ -414,7 +418,7 @@ Code-10 模型 artifact，因此没有修复后的性能和 Figure 4。在正式
 8. 修复早期预警遮蔽和温度参数复用后重跑 Figure 4；静态诊断时间界限已于 P0-03 完成。
 9. 让 Track B 真正读取经审核的 substitution map，或把论文改成“手工指定 token substitution sensitivity”。
 10. 全面删除“safe/actionable treatment guidance”“absolute risk reduction”“pathogenic/protective drug”等超出观察性模型能力的措辞。
-11. Code-08 已成功重跑 Table 1；论文尚未逐格同步，且 baseline ALT/AST 同时间并列项与冻结 legacy 标签的差异须在 Code-10 前决策。
+11. Code-10 已在性能训练前冻结同时间 ALT/AST 全同行规则并重跑 Table 1；论文尚未逐格同步。
 
 ### P1：提交前应处理
 
@@ -516,7 +520,7 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 ## 15. 当前建议的大修顺序
 
 1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split、版本化 artifact，以及 Code-07 模型/损失语义合同。
-2. Code-08 cohort/Table 1 和 Code-09 early-warning/消融合同已完成；先冻结 baseline ALT/AST 同时间并列项/legacy 标签决策，再由 Code-10 执行唯一正式性能 run。
+2. Code-08 cohort/Table 1 和 Code-09 early-warning/消融合同已完成；Code-10 已冻结 earliest-timestamp 全部 ALT/AST 合并的确定性标签规则，正式 cohort 变为44,631 encounters/315 positives；下一步执行唯一正式性能 run。
 3. 论文后续统一采用 `TimeAwareMultimodalTransformer`/TA-MMT，并只保留当前实现和新实验真正支持的创新点。
 4. 用新结果重做 Table 1、Table 2、Figure 1b/1d/2/3/4。
 5. 把 Figure 5/6 降级为单病例模型审计，并改掉因果/治疗用语。
@@ -531,5 +535,6 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 | 2026-08-16 | `cb36322...` + dirty worktree | 未修改 | 完成 Code-05/06：五折四方 patient-group split、selection/calibration 隔离、同一 test logits 配对 raw/calibrated、版本化 deep/sklearn artifact、run-specific 输出和下游 run/fold/mode/data guard；真实 split 与 artifact smoke PASS；未训练正式模型 |
 | 2026-08-17 | `2bfe6ef`（Checkpoint-01）；Code-07 建立于其上 | 未修改 | 冻结 Code-00--06 合同；完成 Code-07：正式模型改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`，旧名仅作 Python 导入兼容；单任务 AHI proxy、unweighted focal (`gamma=2`, no alpha/class weight)、无 AKI/MTL/tuple、逐样本 diagnosis-only dropout、from-scratch；共享配置强制有效 hidden/head 关系；44/44 tests、语义 audit 与 canonical artifact smoke PASS；未训练正式模型，pre-Code-07 结果继续仅作历史证据 |
 | 2026-08-17 | `cc7d434` | 未修改 | 完成并冻结 Code-08/09：真实 Table 1 查询 PASS（46,864 encounters、46,844 patients、391 positives；所有 encounter-level join inflation=1），证实全院住院混合场景；24/48/72 h 三模态 strict cutoff 与 6 项最低消融合同 PASS；未训练/未估计性能，baseline lab 并列项标签决策待冻结 |
+| 2026-08-17 | `6ef982c` 后继 dirty implementation；待 Code-10 checkpoint | 未修改 | 冻结 Code-10 协议：确定性 earliest-timestamp ALT/AST 全同行规则、真实 source patient_id grouped split、AUPRC 早停、128/4主配置与128/8敏感性、六模型 raw/calibrated 同 logits、扩展指标、patient-cluster bootstrap/配对比较和完整结果 manifest；真实标签聚合审计 PASS（44,631 encounters、315 positives）；尚未正式训练 |
 
 以后每次完成会改变论文结论的代码修改，都应在此表增加一行。

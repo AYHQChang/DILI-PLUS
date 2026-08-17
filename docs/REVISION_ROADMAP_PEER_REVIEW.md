@@ -1144,3 +1144,60 @@ demographic baseline。所有消融复用 `DILIPlusDataset` 九输入、同一 g
   Figure 4 属于 Code-10 唯一正式 run。
 - 当前代码/manifest 已提交为 Code-08/09 checkpoint `cc7d434`；Code-10 必须从该提交或明确的
   后继标签合同提交启动，避免训练时 dirty implementation 无法精确引用。
+
+## 21. Code-10 实验协议与确定性标签（2026-08-17）
+
+作者已冻结：确定性重建用于正式实验、legacy 仅作流水线 pilot；128/4为主配置、128/8为
+架构敏感性；六模型先做单 seed/5-fold，再对 primary 与最强 deep comparator 做3-seed稳定性；
+AUPRC 是唯一 selection/early-stopping 主指标。完整协议见
+`docs/EXPERIMENT_PROTOCOL_CODE10.md`。
+
+真实 aggregate label audit `code10_label_audit_post_rebuild_vscode` PASS。最早 ALT/AST 时间戳存在多行的
+encounter 为57,496/57,643，证实旧 `ORDER BY lab_time` 单行选择不充分。新规则把同时间全部
+ALT/AST 合并：每行状态正常/低，且全部可用数值 `<120 U/L`；onset 为严格后续首个数值
+`>=120 U/L`。24 h正式队列为44,631 encounters、44,611 patients、315 positives、44,316
+negatives；无 patient_id 缺失。双方均满足确定性基线规则的48,789例中，legacy 与新标签
+不一致为0，变化来自排除基线不确定/异常 encounter，而不是按性能挑标签。
+
+审计同时发现旧 split 代码把 encounter 字符串下划线前缀当 patient group。Code-10 正式路径
+已改为携带并显式传入 `analysis.v_patient_encounters.patient_id`；20个重复 encounter excess
+必须被绑定在同一角色。确定性重建后的 `code10_formal_patient_splits_vscode` 已更新 Code-05
+manifest：44,631 条队列五折四方 index/group overlap 全为 0。
+
+评价实现统一到 `src/diliplus/evaluation/metrics.py`，覆盖 AUPRC/lift、AUROC、三个 pAUC、
+Brier/Brier skill、NLL、calibration intercept/slope/O:E、QECE、固定风险阈值、top-k告警预算
+和0.5%--5% DCA；finalizer 将生成 pooled OOF patient-cluster CI、primary-vs-comparator配对
+bootstrap和Holm校正。legacy pilot 已在 RTX 5070 Ti 上完成；确定性正式 tensor 双重重建
+逐字节一致，Code-08 Table 1 和 Code-09 合同已基于 44,631 条正式队列更新。此节记录时仍未
+产生可写入论文的正式性能结果。
+
+Table 1 最终 recorded run `code10_formal_table1_vscode_v2` PASS：诊断、encounter dimension 和基线化验
+均匹配 44,631/44,631；patient profile 匹配 43,450/44,631，缺失 1,181 例保留；所有 join
+row inflation 为 1。正式结果为 44,631 encounters、44,611 patients、315 positives，证据见
+`manifests/code08_cohort_table1.json`。Code-09 recorded run
+`code10_formal_code09_contracts_vscode` 同步更新 24/48/72 h 可用性并通过 6/6 最低消融语义审计。
+
+### 21.1 Code-10 pilot、异常恢复与正式运行门
+
+legacy pilot 仅验证流水线，不属于论文结果。首轮在完成 1-fold/1-epoch GPU 训练、温度缩放和
+逐样本预测保存后，Windows 弹出原生异常 `0xc06d007f`；定位到长驻 CUDA/PyTorch 进程中再
+调用 sklearn 原生 LogisticRegression 求 calibration slope/intercept 的动态库冲突。改为纯
+NumPy 的确定性二参数 Newton/IRLS 后，先从已保存的 9,373 条 test predictions 恢复计算，再用
+`--skip-data` 重跑训练端，结果均 PASS。该修复不改变 temperature scaling，也不使用 test
+标签训练模型；它只替换报告用 calibration intercept/slope 的数值求解器。
+
+| Recorded run | 结果 | 作用 |
+|---|---|---|
+| `pilot_legacy_code10_vscode` | 原生异常，保留完整日志与已生成预测 | 暴露 Windows 动态库冲突，不作为成功证据 |
+| `code10_recover_pilot_metrics_vscode` | **PASS** | 已保存预测的完整指标可计算；raw/calibrated AUPRC 均为 0.0322046474 |
+| `pilot_legacy_code10_resume_vscode` | **PASS，38.7 s** | 1-fold/1-epoch primary + LR + XGBoost，GPU 峰值 1,681.1 MB；paper eligible=false |
+| `code10_formal_deterministic_rebuild_vscode` | **PASS，399.3 s** | 两次正式 labels/sequences/diagnoses/vocab 重建逐字节一致 |
+| `code10_formal_patient_splits_vscode` | **PASS，8.88 s** | 44,631 条真实 patient_id 五折四方 split；所有 overlap=0 |
+| `code10_formal_table1_vscode_v2` | **PASS，2.74 s** | 确定性正式 cohort、逐级 DuckDB join 与 Table 1 |
+| `code10_formal_code09_contracts_vscode` | **PASS，23.85 s** | 24/48/72 h availability 与 6/6 消融语义 |
+| `code10_experiment_contract_vscode` | **PASS，2.01 s** | 六模型、128/4、128/8、AUPRC、bootstrap 与源码/配置/数据哈希 |
+| `code10_preformal_tests_vscode` | **61/61 PASS，4.80 s** | 全部合同与回归测试 |
+| `code10_preformal_compileall_vscode` | **PASS，0.18 s** | `src/pipelines/scripts/tests` 语法编译 |
+
+正式运行必须从上述实现提交后的 clean Git checkpoint 启动。主运行顺序固定为四个深度模型
+加 Logistic Regression/XGBoost，共 6 模型 × 5 outer folds；任何 pilot 数值均不得进入论文。

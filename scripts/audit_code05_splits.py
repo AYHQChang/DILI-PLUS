@@ -19,12 +19,13 @@ def main() -> int:
     settings = load_settings()
     cohort = pd.read_parquet(
         settings.model_data_dir / "03_dili_dual_stream_tensors.parquet",
-        columns=["encounter_id", "label_ahi_proxy"],
+        columns=["encounter_id", "patient_id", "label_ahi_proxy"],
     )
     folds = build_nested_grouped_splits(
         cohort["encounter_id"].astype(str).to_numpy(),
         cohort["label_ahi_proxy"].astype(int).to_numpy(),
         settings,
+        group_ids=cohort["patient_id"].astype(str).to_numpy(),
     )
     tracked, local = save_split_audit(
         folds,
@@ -32,6 +33,7 @@ def main() -> int:
         cohort["label_ahi_proxy"].astype(int).to_numpy(),
         "code05_real_data_audit",
         settings,
+        group_ids=cohort["patient_id"].astype(str).to_numpy(),
     )
     payload = json.loads(tracked.read_text(encoding="utf-8"))
     print(json.dumps(payload, ensure_ascii=False, indent=2))

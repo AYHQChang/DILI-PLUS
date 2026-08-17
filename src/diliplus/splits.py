@@ -8,8 +8,9 @@ Each outer fold has four mutually exclusive roles:
 * ``test`` is consumed once for final inference.
 
 The split code sorts encounters internally before splitting, so membership does
-not depend on Parquet row order. Patient groups are derived from the encounter
-identifier prefix used by the existing project.
+not depend on Parquet row order. Formal callers pass the source-system
+``patient_id`` explicitly. Encounter-prefix inference remains only as a
+compatibility fallback for old unit tests and is not used by formal trainers.
 """
 
 from __future__ import annotations
@@ -184,6 +185,7 @@ def build_nested_grouped_splits(
     encounter_ids: Iterable[Any],
     labels: Iterable[int],
     settings=None,
+    group_ids: Iterable[Any] | None = None,
 ) -> list[FoldSplit]:
     settings = settings or load_settings()
     encounter_ids = np.asarray([str(value) for value in encounter_ids], dtype=object)
@@ -195,9 +197,17 @@ def build_nested_grouped_splits(
     if not set(np.unique(labels)).issubset({0, 1}) or len(np.unique(labels)) != 2:
         raise ValueError("labels must contain both binary classes")
 
-    groups = np.asarray(
-        [patient_group_from_encounter_id(value) for value in encounter_ids], dtype=object
-    )
+    if group_ids is None:
+        groups = np.asarray(
+            [patient_group_from_encounter_id(value) for value in encounter_ids],
+            dtype=object,
+        )
+    else:
+        groups = np.asarray([str(value) for value in group_ids], dtype=object)
+        if len(groups) != len(encounter_ids):
+            raise ValueError("group_ids must have the same length as encounter_ids")
+        if any(not value or value.lower() in {"nan", "none"} for value in groups):
+            raise ValueError("formal patient group_ids must be non-null and non-empty")
     order = np.argsort(encounter_ids.astype(str), kind="stable")
     ordered_labels = labels[order]
     ordered_groups = groups[order]
@@ -256,6 +266,7 @@ def aggregate_split_manifest(
     encounter_ids: Iterable[Any],
     labels: Iterable[int],
     settings=None,
+    group_ids: Iterable[Any] | None = None,
 ) -> dict[str, Any]:
     settings = settings or load_settings()
     encounter_ids = np.asarray([str(value) for value in encounter_ids], dtype=object)
@@ -275,7 +286,11 @@ def aggregate_split_manifest(
             "selection_fraction_of_outer_train": protocol.selection_fraction,
             "calibration_fraction_of_outer_train": protocol.calibration_fraction,
             "split_search_attempts": protocol.split_search_attempts,
-            "group_definition": "encounter_id prefix before first underscore",
+            "group_definition": (
+                "analysis.v_patient_encounters.patient_id"
+                if group_ids is not None
+                else "compatibility fallback: encounter_id prefix before first underscore"
+            ),
             "roles": {
                 "training": "model parameter fitting only",
                 "selection": "epoch/hyperparameter selection only",
@@ -305,9 +320,12 @@ def save_split_audit(
     labels: Iterable[int],
     run_id: str,
     settings=None,
+    group_ids: Iterable[Any] | None = None,
 ) -> tuple[Path, Path]:
     settings = settings or load_settings()
-    aggregate = aggregate_split_manifest(folds, encounter_ids, labels, settings)
+    aggregate = aggregate_split_manifest(
+        folds, encounter_ids, labels, settings, group_ids=group_ids
+    )
     aggregate["configuration_sha256"] = _file_sha256(settings.config_path)
     aggregate["split_implementation_sha256"] = _file_sha256(Path(__file__))
     aggregate["manifest_payload_sha256"] = _canonical_sha256(

@@ -196,6 +196,75 @@
         "panel": "shared",
         "clear": true
       }
+    },
+    {
+      "label": "DILI-PLUS: Code-10 deterministic label audit",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code10_label_audit_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\audit_code10_label_rebuild.py"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: Code-10 legacy GPU pilot",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "pilot_legacy_code10_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\run_code10_legacy_pilot.py",
+        "--run-id",
+        "pilot_legacy_code10_vscode"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: Code-10 formal six-model run",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code10_formal_128d4h_seed0",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\pipelines\\02_train_models.py",
+        "--config",
+        "${workspaceFolder}\\configs\\default.yaml",
+        "--run-id",
+        "code10_formal_128d4h_seed0"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
     }
   ]
 }

@@ -40,6 +40,7 @@ def build_dili_tensors(settings=None):
     try:
         cohort_columns = [
             "encounter_id",
+            "patient_id",
             "label_ahi_proxy",
             "label_dili",
             "t_onset",
@@ -51,6 +52,13 @@ def build_dili_tensors(settings=None):
             "last_med_time",
             "index_time_source",
             "pseudo_index_seed",
+            "label_source",
+            "baseline_time",
+            "baseline_target_rows",
+            "baseline_distinct_target_items",
+            "baseline_numeric_rows",
+            "baseline_max_value",
+            "baseline_rule_pass",
         ]
         df_cohort = pd.read_parquet(label_path)[cohort_columns]
         conn.execute(

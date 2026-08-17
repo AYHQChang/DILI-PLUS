@@ -65,6 +65,9 @@ class TrainingSettings:
     dropout: float = 0.3
     diagnosis_modality_dropout_prob: float = 0.15
     focal_gamma: float = 2.0
+    selection_metric: str = "AUPRC"
+    early_stopping_patience: int = 7
+    scheduler_patience: int = 3
 
     def __post_init__(self) -> None:
         if self.epochs < 1 or self.batch_size < 1:
@@ -89,16 +92,28 @@ class TrainingSettings:
             )
         if self.focal_gamma < 0:
             raise ValueError("training focal_gamma must be non-negative")
+        if self.selection_metric != "AUPRC":
+            raise ValueError("formal training selection_metric must be AUPRC")
+        if self.early_stopping_patience < 1 or self.scheduler_patience < 1:
+            raise ValueError("training patience values must be positive")
 
 
 @dataclass(frozen=True)
 class PredictionSettings:
+    label_source: str = "deterministic_rebuild"
+    baseline_threshold_u_l: float = 120.0
     gap_hours: float = 24.0
     pseudo_index_seed: int = 20260816
     audit_horizons_hours: tuple[float, ...] = (0.0, 12.0, 24.0, 48.0, 72.0)
     early_warning_horizons_hours: tuple[float, ...] = (24.0, 48.0, 72.0)
 
     def __post_init__(self) -> None:
+        if self.label_source not in {"deterministic_rebuild", "legacy_frozen"}:
+            raise ValueError(
+                "prediction.label_source must be deterministic_rebuild or legacy_frozen"
+            )
+        if self.baseline_threshold_u_l <= 0:
+            raise ValueError("prediction.baseline_threshold_u_l must be positive")
         if self.gap_hours < 0:
             raise ValueError("prediction.gap_hours must be non-negative")
         if not self.audit_horizons_hours:
@@ -161,6 +176,13 @@ class EvaluationProtocolSettings:
     selection_fraction: float = 0.15
     calibration_fraction: float = 0.15
     split_search_attempts: int = 128
+    bootstrap_replicates: int = 1000
+    p_auc_fpr_limits: tuple[float, ...] = (0.05, 0.10, 0.20)
+    risk_thresholds: tuple[float, ...] = (0.005, 0.01, 0.02, 0.05)
+    alert_budgets: tuple[float, ...] = (0.005, 0.01, 0.02, 0.05)
+    dca_min_threshold: float = 0.005
+    dca_max_threshold: float = 0.05
+    dca_step: float = 0.0025
 
     def __post_init__(self) -> None:
         if self.outer_folds < 2:
@@ -178,6 +200,21 @@ class EvaluationProtocolSettings:
             )
         if self.split_search_attempts < 1:
             raise ValueError("evaluation_protocol.split_search_attempts must be positive")
+        if self.bootstrap_replicates < 100:
+            raise ValueError("evaluation_protocol.bootstrap_replicates must be at least 100")
+        for name, values in (
+            ("p_auc_fpr_limits", self.p_auc_fpr_limits),
+            ("risk_thresholds", self.risk_thresholds),
+            ("alert_budgets", self.alert_budgets),
+        ):
+            if not values or any(not 0.0 < value < 1.0 for value in values):
+                raise ValueError(f"evaluation_protocol.{name} must be within (0, 1)")
+            if tuple(sorted(set(values))) != tuple(values):
+                raise ValueError(f"evaluation_protocol.{name} must be unique and increasing")
+        if not 0.0 < self.dca_min_threshold < self.dca_max_threshold < 1.0:
+            raise ValueError("evaluation_protocol DCA bounds must satisfy 0 < min < max < 1")
+        if self.dca_step <= 0:
+            raise ValueError("evaluation_protocol.dca_step must be positive")
 
 
 def _hours_tag(hours: float) -> str:
@@ -195,6 +232,7 @@ class Settings:
     reproducibility: ReproducibilitySettings
     evaluation_protocol: EvaluationProtocolSettings
     config_path: Path
+    config_sources: tuple[Path, ...]
 
     def __post_init__(self) -> None:
         if self.database_read_only is not True:
@@ -232,10 +270,41 @@ class Settings:
         return self.paths.manifests / "code00_code04_baseline.json"
 
 
+def _deep_merge(base: dict[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if (
+            key in merged
+            and isinstance(merged[key], dict)
+            and isinstance(value, Mapping)
+        ):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _read_config_with_extends(
+    path: Path, seen: tuple[Path, ...] = ()
+) -> tuple[dict[str, Any], tuple[Path, ...]]:
+    path = path.resolve()
+    if path in seen:
+        raise ValueError(f"Configuration extends cycle detected at {path}")
+    with path.open("r", encoding="utf-8") as stream:
+        raw = yaml.safe_load(stream) or {}
+    extends = raw.pop("extends", None)
+    if extends is None:
+        return raw, (path,)
+    base_path = Path(extends)
+    if not base_path.is_absolute():
+        base_path = path.parent / base_path
+    base, sources = _read_config_with_extends(base_path, seen + (path,))
+    return _deep_merge(base, raw), sources + (path,)
+
+
 def load_settings(config_path: str | Path | None = None) -> Settings:
     resolved_config = Path(config_path).resolve() if config_path else DEFAULT_CONFIG_PATH
-    with resolved_config.open("r", encoding="utf-8") as stream:
-        raw = yaml.safe_load(stream) or {}
+    raw, config_sources = _read_config_with_extends(resolved_config)
 
     configured_root = Path(raw.get("project_root", PACKAGE_PROJECT_ROOT))
     if not configured_root.is_absolute():
@@ -269,8 +338,19 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
                 training.get("diagnosis_modality_dropout_prob", 0.15)
             ),
             focal_gamma=float(training.get("focal_gamma", 2.0)),
+            selection_metric=str(training.get("selection_metric", "AUPRC")),
+            early_stopping_patience=int(
+                training.get("early_stopping_patience", 7)
+            ),
+            scheduler_patience=int(training.get("scheduler_patience", 3)),
         ),
         prediction=PredictionSettings(
+            label_source=str(
+                prediction.get("label_source", "deterministic_rebuild")
+            ),
+            baseline_threshold_u_l=float(
+                prediction.get("baseline_threshold_u_l", 120.0)
+            ),
             gap_hours=float(prediction.get("gap_hours", 24.0)),
             pseudo_index_seed=int(prediction.get("pseudo_index_seed", 20260816)),
             audit_horizons_hours=tuple(
@@ -316,6 +396,35 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
             split_search_attempts=int(
                 evaluation_protocol.get("split_search_attempts", 128)
             ),
+            bootstrap_replicates=int(
+                evaluation_protocol.get("bootstrap_replicates", 1000)
+            ),
+            p_auc_fpr_limits=tuple(
+                float(value)
+                for value in evaluation_protocol.get(
+                    "p_auc_fpr_limits", [0.05, 0.10, 0.20]
+                )
+            ),
+            risk_thresholds=tuple(
+                float(value)
+                for value in evaluation_protocol.get(
+                    "risk_thresholds", [0.005, 0.01, 0.02, 0.05]
+                )
+            ),
+            alert_budgets=tuple(
+                float(value)
+                for value in evaluation_protocol.get(
+                    "alert_budgets", [0.005, 0.01, 0.02, 0.05]
+                )
+            ),
+            dca_min_threshold=float(
+                evaluation_protocol.get("dca_min_threshold", 0.005)
+            ),
+            dca_max_threshold=float(
+                evaluation_protocol.get("dca_max_threshold", 0.05)
+            ),
+            dca_step=float(evaluation_protocol.get("dca_step", 0.0025)),
         ),
         config_path=resolved_config,
+        config_sources=config_sources,
     )

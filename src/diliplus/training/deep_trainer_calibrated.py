@@ -11,14 +11,14 @@ DILI-PLUS | 深度学习训练与后置温度缩放（包实现）
 无类别权重的 focal modulation，不包含 AKI、多任务不确定性加权或自校准。
 """
 
-import os
+import time
 import torch
 import torch.optim as optim
 import argparse
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss, roc_curve
+from sklearn.metrics import roc_auc_score, average_precision_score
 from torch.utils.data import DataLoader, Subset
 
 from diliplus.artifacts import (
@@ -35,6 +35,8 @@ from diliplus.calibration import (
 )
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
+from diliplus.data.lineage import validate_model_data_lineage
+from diliplus.evaluation.metrics import compute_binary_metrics
 from diliplus.models.registry import (
     DEEP_EXPERIMENT_NAMES,
     build_deep_experiment_model,
@@ -54,92 +56,26 @@ from diliplus.training.losses import UnweightedFocalLoss
 import warnings
 warnings.filterwarnings("ignore")
 
-# =============================================================================
-# 第二部分：现有评估指标计算（正式统计合同将在 Code-10 完成）
-# =============================================================================
-def calculate_partial_auc(y_true, y_prob, fpr_limit=0.2):
-    """计算 FPR <= 0.2 区间内的 Partial AUC，更符合高特异性临床需求。"""
-    fpr, tpr, _ = roc_curve(y_true, y_prob)
-    if fpr_limit <= 0 or fpr_limit > 1: return 0.0
-    valid_idx = np.where(fpr <= fpr_limit)[0]
-    if len(valid_idx) < 2: return 0.0
-    
-    fpr_part = fpr[valid_idx]
-    tpr_part = tpr[valid_idx]
-    
-    # 线性插值闭合边界
-    if fpr_part[-1] < fpr_limit:
-        idx_next = valid_idx[-1] + 1
-        if idx_next < len(fpr):
-            slope = (tpr[idx_next] - tpr_part[-1]) / (fpr[idx_next] - fpr_part[-1] + 1e-9)
-            tpr_interp = tpr_part[-1] + slope * (fpr_limit - fpr_part[-1])
-            fpr_part = np.append(fpr_part, fpr_limit)
-            tpr_part = np.append(tpr_part, tpr_interp)
-            
-    pauc = np.trapezoid(tpr_part, fpr_part)
-    max_pauc = fpr_limit * 1.0 
-    return pauc / max_pauc
+def _dca_thresholds(settings):
+    protocol = settings.evaluation_protocol
+    return np.arange(
+        protocol.dca_min_threshold,
+        protocol.dca_max_threshold + protocol.dca_step / 2.0,
+        protocol.dca_step,
+    )
 
-def calculate_net_benefit(y_true, y_prob, thresholds=np.arange(0.01, 1.0, 0.01)):
-    """计算临床决策曲线 (Decision Curve Analysis, DCA) 的 Net Benefit 及 AUDC"""
-    net_benefits = []
-    n = len(y_true)
-    if n == 0: return 0.0
-    for pt in thresholds:
-        preds = (y_prob >= pt).astype(int)
-        tp = np.sum((preds == 1) & (y_true == 1))
-        fp = np.sum((preds == 1) & (y_true == 0))
-        nb = (tp / n) - (fp / n) * (pt / (1 - pt))
-        net_benefits.append(nb)
-    return np.trapezoid(np.maximum(net_benefits, 0), thresholds)
 
-def calculate_quantile_ece(y_true, y_prob, n_bins=10):
-    """等频分箱的校准误差 (Quantile ECE)，对极端不平衡数据更稳健"""
-    try:
-        bins = np.quantile(y_prob, np.linspace(0, 1, n_bins + 1))
-        bins[-1] += 1e-8 
-        binids = np.digitize(y_prob, bins) - 1
-    except:
-        bins = np.linspace(0, 1, n_bins + 1)
-        binids = np.digitize(y_prob, bins) - 1
-        
-    ece = 0.0
-    for i in range(n_bins):
-        bin_idx = binids == i
-        if np.sum(bin_idx) > 0:
-            prob_mean = np.mean(y_prob[bin_idx])
-            acc_mean = np.mean(y_true[bin_idx])
-            ece += (np.sum(bin_idx) / len(y_prob)) * np.abs(prob_mean - acc_mean)
-    return ece
-
-def calculate_sci_metrics_with_ci(
-    y_true, y_prob, n_bootstraps=1000, bootstrap_seed=DEFAULT_SEED
-):
-    """汇总所有指标并计算 Bootstrap 95% 置信区间"""
-    y_true = np.array(y_true)
-    y_prob = np.array(y_prob)
-    
-    auroc = roc_auc_score(y_true, y_prob)
-    auprc = average_precision_score(y_true, y_prob)
-    brier = brier_score_loss(y_true, y_prob)
-    ece = calculate_quantile_ece(y_true, y_prob)
-    pauc = calculate_partial_auc(y_true, y_prob)
-    audc = calculate_net_benefit(y_true, y_prob)
-    
-    bootstrapped_auroc = []
-    rng = np.random.default_rng(bootstrap_seed)
-    for _ in range(n_bootstraps):
-        indices = rng.integers(0, len(y_prob), len(y_prob))
-        if len(np.unique(y_true[indices])) < 2: continue
-        bootstrapped_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
-        
-    ci_lower = np.percentile(bootstrapped_auroc, 2.5) if bootstrapped_auroc else auroc
-    ci_upper = np.percentile(bootstrapped_auroc, 97.5) if bootstrapped_auroc else auroc
-
-    return {
-        "AUROC": auroc, "AUROC_95CI_Lower": ci_lower, "AUROC_95CI_Upper": ci_upper,
-        "AUPRC": auprc, "Brier": brier, "Quantile_ECE": ece, "pAUC_0.2": pauc, "NetBenefit_AUDC": audc
-    }
+def _formal_metrics(y_true, y_prob, reference_prevalence, settings):
+    protocol = settings.evaluation_protocol
+    return compute_binary_metrics(
+        y_true,
+        y_prob,
+        reference_prevalence=reference_prevalence,
+        p_auc_fpr_limits=protocol.p_auc_fpr_limits,
+        risk_thresholds=protocol.risk_thresholds,
+        alert_budgets=protocol.alert_budgets,
+        dca_thresholds=_dca_thresholds(settings),
+    )
 
 # =============================================================================
 # 第三部分：单任务深度学习训练与推理逻辑
@@ -191,19 +127,15 @@ def collect_logits(model, dataloader, device):
     return np.concatenate(all_logits, axis=0), np.asarray(all_labels, dtype=np.int64)
 
 
-def evaluate(
-    model, dataloader, device, return_raw=False, bootstrap_seed=DEFAULT_SEED
-):
+def evaluate(model, dataloader, device, return_raw=False, bootstrap_seed=DEFAULT_SEED):
     logits, all_labels = collect_logits(model, dataloader, device)
     all_preds = probabilities_from_logits(logits, 1.0, "raw")
     if return_raw:
         return np.asarray(all_preds), np.asarray(all_labels)
-    metrics = calculate_sci_metrics_with_ci(
-        all_labels,
-        all_preds,
-        n_bootstraps=100,
-        bootstrap_seed=bootstrap_seed,
-    )
+    metrics = {
+        "AUROC": float(roc_auc_score(all_labels, all_preds)),
+        "AUPRC": float(average_precision_score(all_labels, all_preds)),
+    }
     return metrics, all_preds.tolist(), all_labels.tolist()
 
 # =============================================================================
@@ -222,7 +154,22 @@ def main(argv=None, settings=None):
     parser.add_argument('--batch_size', type=int, default=settings.training.batch_size)
     parser.add_argument('--lr', type=float, default=settings.training.learning_rate)
     parser.add_argument('--run-id', required=True)
+    parser.add_argument(
+        '--run-kind', choices=('formal', 'pilot_legacy'), default='formal'
+    )
+    parser.add_argument(
+        '--max-folds', type=int, default=None,
+        help='Pilot-only limit; formal runs must evaluate all configured outer folds.',
+    )
+    parser.add_argument('--seed-index', type=int, default=0)
     args = parser.parse_args(argv)
+    if args.run_kind == 'pilot_legacy' and not args.run_id.startswith('pilot_legacy'):
+        parser.error("pilot_legacy run IDs must start with 'pilot_legacy'")
+    if args.run_kind == 'formal' and args.max_folds is not None:
+        parser.error("formal runs may not limit outer folds")
+    if args.max_folds is not None and args.max_folds < 1:
+        parser.error("max-folds must be positive")
+    lineage = validate_model_data_lineage(settings, args.run_kind)
 
     CONFIG = {
         "data_dir": str(settings.model_data_dir),
@@ -236,12 +183,16 @@ def main(argv=None, settings=None):
         "split_seed": settings.reproducibility.split_seed,
         "bootstrap_seed": settings.reproducibility.bootstrap_seed,
         "dataloader_num_workers": settings.reproducibility.dataloader_num_workers,
+        "run_kind": args.run_kind,
+        "seed_index": args.seed_index,
     }
     report_root = run_report_dir(settings, args.run_id)
     preds_dir = report_root / "predictions" / args.model
     metrics_dir = report_root / "metrics"
+    history_dir = report_root / "history" / args.model
     preds_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
+    history_dir.mkdir(parents=True, exist_ok=True)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -249,8 +200,18 @@ def main(argv=None, settings=None):
     full_dataset = DILIPlusDataset(CONFIG["data_dir"], CONFIG["vocab_dir"])
     
     encounter_ids = full_dataset.data["encounter_id"].astype(str).to_numpy()
+    if (
+        "patient_id" not in full_dataset.data.columns
+        or full_dataset.data["patient_id"].isna().any()
+    ):
+        raise KeyError("Formal deep-model data require non-null source patient_id groups")
+    patient_ids = full_dataset.data["patient_id"].astype(str).to_numpy()
     labels = np.asarray(full_dataset.labels, dtype=np.int64)
-    folds = build_nested_grouped_splits(encounter_ids, labels, settings)
+    folds = build_nested_grouped_splits(
+        encounter_ids, labels, settings, group_ids=patient_ids
+    )
+    if args.max_folds is not None:
+        folds = folds[: args.max_folds]
     data_fingerprint = dataset_fingerprint(settings)
     training_config = config_snapshot(
         settings,
@@ -274,6 +235,12 @@ def main(argv=None, settings=None):
             "diagnosis_modality_dropout_prob": (
                 settings.training.diagnosis_modality_dropout_prob
             ),
+            "selection_metric": settings.training.selection_metric,
+            "early_stopping_patience": settings.training.early_stopping_patience,
+            "scheduler_patience": settings.training.scheduler_patience,
+            "run_kind": args.run_kind,
+            "seed_index": args.seed_index,
+            "data_lineage": lineage,
             "model_input_spec": experiment_spec(args.model),
         },
     )
@@ -286,7 +253,9 @@ def main(argv=None, settings=None):
     for split in folds:
         fold = split.fold
         print(f"\n--- Fold {fold}/{len(folds)} ---")
-        fold_seed = derive_seed(CONFIG["global_seed"], args.model, fold)
+        fold_seed = derive_seed(
+            CONFIG["global_seed"], args.model, fold, "seed_index", args.seed_index
+        )
         seed_everything(fold_seed, settings.reproducibility.deterministic_torch)
 
         train_loader = DataLoader(
@@ -329,13 +298,22 @@ def main(argv=None, settings=None):
             weight_decay=CONFIG["weight_decay"],
         )
         
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='max',
+            factor=0.5,
+            patience=settings.training.scheduler_patience,
+        )
 
-        best_auroc = float("-inf")
+        best_auprc = float("-inf")
         best_state = None
         selected_epoch = 0
-        patience_limit = 7
+        patience_limit = settings.training.early_stopping_patience
         patience_counter = 0
+        fold_started = time.perf_counter()
+        history_rows = []
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
 
         # --- 阶段 1：深度学习主干训练 ---
         for epoch in range(CONFIG["epochs"]):
@@ -350,12 +328,25 @@ def main(argv=None, settings=None):
             )
             
             current_lr = optimizer.param_groups[0]['lr']
-            print(f"   Ep [{epoch+1}/{CONFIG['epochs']}] LR: {current_lr:.6f} | Loss: {train_loss:.4f} | Val AUC: {metrics['AUROC']:.4f}")
+            history_rows.append(
+                {
+                    "epoch": epoch + 1,
+                    "learning_rate": current_lr,
+                    "training_loss": train_loss,
+                    "selection_AUROC": metrics['AUROC'],
+                    "selection_AUPRC": metrics['AUPRC'],
+                }
+            )
+            print(
+                f"   Ep [{epoch+1}/{CONFIG['epochs']}] LR: {current_lr:.6f} | "
+                f"Loss: {train_loss:.4f} | Selection AUPRC: {metrics['AUPRC']:.4f} | "
+                f"AUROC: {metrics['AUROC']:.4f}"
+            )
             
-            scheduler.step(metrics['AUROC'])
+            scheduler.step(metrics['AUPRC'])
             
-            if metrics['AUROC'] > best_auroc:
-                best_auroc = metrics['AUROC']
+            if metrics['AUPRC'] > best_auprc:
+                best_auprc = metrics['AUPRC']
                 selected_epoch = epoch + 1
                 best_state = {
                     key: value.detach().cpu().clone()
@@ -373,6 +364,9 @@ def main(argv=None, settings=None):
             raise RuntimeError(f"Fold {fold} did not produce a selected checkpoint")
         model.load_state_dict(best_state, strict=True)
         model.to(device)
+        pd.DataFrame(history_rows).to_csv(
+            history_dir / f"fold_{fold:02d}.csv", index=False
+        )
 
         # Calibration is a separate role and is never used for epoch selection.
         calibration_logits, calibration_labels = collect_logits(
@@ -387,24 +381,29 @@ def main(argv=None, settings=None):
         test_preds_raw = probabilities_from_logits(test_logits, best_T, "raw")
         test_preds_calib = probabilities_from_logits(test_logits, best_T, "calibrated")
         
-        final_metrics = calculate_sci_metrics_with_ci(
-            test_labels,
-            test_preds_calib,
-            n_bootstraps=1000,
-            bootstrap_seed=derive_seed(
-                CONFIG["bootstrap_seed"], args.model, fold, "final"
-            ),
+        reference_prevalence = float(labels[split.training].mean())
+        fold_duration = time.perf_counter() - fold_started
+        peak_gpu_mb = (
+            float(torch.cuda.max_memory_allocated(device) / 1024**2)
+            if device.type == "cuda"
+            else 0.0
         )
-        print(f"Calibrated Fold {fold} | AUROC: {final_metrics['AUROC']:.4f} | Quantile ECE: {final_metrics['Quantile_ECE']:.4f}")
 
         pred_df = pd.DataFrame(
             {
                 "dataset_index": split.test,
+                "encounter_id": encounter_ids[split.test],
+                "patient_id": patient_ids[split.test],
                 "y_true": test_labels,
+                "logit_0": test_logits[:, 0],
+                "logit_1": test_logits[:, 1],
                 "y_prob_raw": test_preds_raw,
                 "y_prob_calibrated": test_preds_calib,
                 "fold": fold,
                 "run_id": args.run_id,
+                "run_kind": args.run_kind,
+                "seed_index": args.seed_index,
+                "reference_prevalence": reference_prevalence,
             }
         )
         pred_df.to_csv(preds_dir / f"fold_{fold:02d}.csv", index=False)
@@ -426,17 +425,38 @@ def main(argv=None, settings=None):
             metadata,
         )
 
-        final_metrics.update(
-            {
-                "Model_Architecture": args.model,
-                "Fold": fold,
-                "Run_ID": args.run_id,
-                "Selected_Epoch": selected_epoch,
-                "Temperature": best_T,
-                "Probability_Mode": "calibrated",
-            }
+        for probability_mode, probabilities in (
+            ("raw", test_preds_raw),
+            ("calibrated", test_preds_calib),
+        ):
+            final_metrics = _formal_metrics(
+                test_labels, probabilities, reference_prevalence, settings
+            )
+            final_metrics.update(
+                {
+                    "Model_Architecture": args.model,
+                    "Fold": fold,
+                    "Run_ID": args.run_id,
+                    "Run_Kind": args.run_kind,
+                    "Seed_Index": args.seed_index,
+                    "Selected_Epoch": selected_epoch,
+                    "Best_Selection_AUPRC": best_auprc,
+                    "Temperature": best_T,
+                    "Probability_Mode": probability_mode,
+                    "Parameter_Count": int(
+                        sum(parameter.numel() for parameter in model.parameters())
+                    ),
+                    "Fold_Duration_Seconds": fold_duration,
+                    "Peak_GPU_Memory_MB": peak_gpu_mb,
+                    "Device": str(device),
+                }
+            )
+            all_fold_results.append(final_metrics)
+        print(
+            f"Fold {fold} | calibrated AUROC: {all_fold_results[-1]['AUROC']:.4f} | "
+            f"AUPRC: {all_fold_results[-1]['AUPRC']:.4f} | "
+            f"duration: {fold_duration:.1f}s | peak GPU: {peak_gpu_mb:.1f} MB"
         )
-        all_fold_results.append(final_metrics)
 
     # One run-specific file per model; never append rows from older runs.
     report_path = metrics_dir / f"{args.model}.csv"

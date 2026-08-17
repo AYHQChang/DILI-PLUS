@@ -103,7 +103,15 @@ def build_dili_cohort(settings=None):
     try:
         conn.execute(aligned_labs_query)
         output_parquet = os.path.join(data_dir, "01_aligned_dili_labs.parquet")
-        conn.execute(f"COPY temp_aligned_labs TO '{output_parquet}' (FORMAT PARQUET)")
+        conn.execute(
+            f"""
+            COPY (
+                SELECT * FROM temp_aligned_labs
+                ORDER BY encounter_id, lab_time, lab_item,
+                         TRY_CAST(lab_value AS DOUBLE), abnormal_status
+            ) TO '{output_parquet}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            """
+        )
         
         res_count = conn.execute("SELECT COUNT(*) FROM temp_aligned_labs").fetchone()[0]
         df_summary = conn.execute("""

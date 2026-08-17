@@ -452,7 +452,8 @@ python pipelines/05_build_paper_assets.py --stages table_1
 prediction time 过滤的诊断，以及按患者键连接的整张 `laboratory_report_sub`。这会同时产生：
 
 - 标签列名和当前正式 cohort 不一致；
-- 论文曾使用的 51,316 条旧 cohort 与当前 24 h 模型 cohort 46,864 条混淆；
+- 论文曾使用的 51,316 条 onset-time legacy cohort、Code-02 的 46,864 条冻结标签队列与
+  Code-10 的 44,631 条确定性正式队列混淆；
 - 患者级化验连接到多次住院，形成隐蔽的一对多行膨胀；
 - 原始大表扫描和连接导致内存中断；
 - 捕获 SQL 异常后函数直接 `return`，上层 pipeline 仍可能看起来正常结束；
@@ -541,15 +542,15 @@ matched_left_encounters > 0
 
 | 连接阶段 | 匹配/左侧 | 输出行 | 膨胀系数 |
 |---|---:|---:|---:|
-| time-bounded diagnosis | 46,864 / 46,864 | 46,864 | 1.000000 |
-| encounter dimension | 46,864 / 46,864 | 46,864 | 1.000000 |
-| patient profile | 45,639 / 46,864 | 46,864 | 1.000000 |
-| aligned baseline labs | 46,864 / 46,864 | 46,864 | 1.000000 |
+| time-bounded diagnosis | 44,631 / 44,631 | 44,631 | 1.000000 |
+| encounter dimension | 44,631 / 44,631 | 44,631 | 1.000000 |
+| patient profile | 43,450 / 44,631 | 44,631 | 1.000000 |
+| aligned baseline labs | 44,631 / 44,631 | 44,631 | 1.000000 |
 
-人口学未匹配的 1,225 个 encounter 保留在 cohort 中并作为缺失报告；不得因为 Table 1 某列
-缺失而从模型 cohort 删除病例。最终为 46,864 encounters、46,844 unique patients、391 个
-AHI-proxy positives（0.8343%）；20 名患者各有一次额外住院。科室分布证明这是全院住院混合
-cohort，不是 ICU-only cohort：名称筛查得到重症/监护相关 447 encounters，其余/未知 46,417。
+人口学未匹配的 1,181 个 encounter 保留在 cohort 中并作为缺失报告；不得因为 Table 1 某列
+缺失而从模型 cohort 删除病例。最终为 44,631 encounters、44,611 unique patients、315 个
+AHI-proxy positives（0.7058%）；20 名患者各有一次额外住院。科室分布证明这是全院住院混合
+cohort，不是 ICU-only cohort：名称筛查得到重症/监护相关 399 encounters，其余/未知 44,232。
 
 这些数字属于当前快照，其他项目不得硬编码。
 
@@ -576,20 +577,18 @@ cohort，不是 ICU-only cohort：名称筛查得到重症/监护相关 447 enco
 9. **错误必须传播。** 关系缺失、0 匹配、重复键或 N 改变均以非零退出结束 recorded run；不得
    catch 后只写一行失败日志并返回成功。
 
-#### 9.7.6 基线化验审计的额外警告
+#### 9.7.6 基线化验合同与已经冻结的决策
 
-当前冻结标签历史实现只按 `lab_time` 排列 ALT/AST，没有为同一时间戳提供稳定的项目/数值
-tie-break；同时 Code-02 为保持旧论文 cohort，读取了冻结的 legacy label artifact，而没有重算
-标签。Code-08 以当前 aligned-lab 缓存按 `lab_time, lab_item, lab_value` 确定性重建首项后发现：
+Code-02 的冻结标签历史实现只按 `lab_time` 排列 ALT/AST，没有为同一时间戳提供稳定的项目/
+数值 tie-break。Code-10 已在查看正式模型性能前冻结并执行确定性方案：取最早 ALT/AST
+时间戳的全部同行；每行状态均须正常/低，且全部可用数值均 `<120 U/L`；结局为其后首次
+数值 `>=120 U/L`，预测时点再前移 24 h。legacy 标签只允许用于明确标记的流水线 pilot。
 
-- AHI-proxy negative 46,473 个中，45,260 个首项状态为正常/低；
-- AHI-proxy positive 391 个中，362 个首项状态为正常/低；
-- positive 中有 5 个确定性首项数值 `>=120`，但没有“正常/低状态且数值 >=120”的直接冲突。
-
-这不是可以用 Table 1 排版消除的差异。它提示冻结 legacy 标签与当前确定性重建之间存在
-同时间并列项/历史规则不完全一致。在 Code-10 正式训练前必须把它作为标签合同决策：要么
-保留冻结 cohort 并在论文明确其规则和该审计限制，要么预先定义同时间多项的临床合并规则、
-重建标签和全部下游产物。不能看到新性能后再选择方案。
+双重完整重建逐字节一致；新正式队列为 44,631 encounters / 315 positives，所有正式样本的
+基线状态和数值均满足规则，Table 1 的 `baseline_numeric_ge_120` 为 0。双方都满足新基线规则的
+48,789 个 encounter 中，legacy 与确定性标签不一致为 0；人数变化来自预先规定的基线资格
+排除，不是查看性能后选择标签。证据见 `manifests/code10_label_rebuild_audit.json` 和
+`manifests/code08_cohort_table1.json`。
 
 #### 9.7.7 输出和复用
 
@@ -606,7 +605,8 @@ source_schema_contract.csv       关系和字段合同
 ```
 
 可提交的 `manifests/code08_cohort_table1.json` 只含 aggregate counts、合同和输入/输出哈希，
-不含 patient/encounter ID。最终执行记录为 `code08-table1-20260817-v3`。新项目可以复用
+不含 patient/encounter ID。Code-10 确定性正式队列的执行记录为
+`code10_formal_table1_vscode`。新项目可以复用
 “schema contract → cohort anchor → one-stage join → cardinality audit → aggregate report”框架，
 但不能直接复用本项目的表名、结局、ICD 前缀、实验室中文名称或匹配阈值。
 

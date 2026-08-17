@@ -11,18 +11,20 @@ training/selection/calibration/test 四方 grouped split，并仅对 outer test 
 
 import os
 import argparse
+import time
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
-from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss, roc_curve
 from sklearn.base import clone
 from scipy.sparse import hstack
 import warnings
 warnings.filterwarnings("ignore")
 
 from diliplus.config import load_settings
+from diliplus.data.lineage import validate_model_data_lineage
+from diliplus.evaluation.metrics import compute_binary_metrics
 from diliplus.reproducibility import DEFAULT_SEED, derive_seed, seed_everything
 from diliplus.artifacts import (
     build_artifact_metadata,
@@ -39,91 +41,22 @@ from diliplus.calibration import (
 )
 from diliplus.splits import build_nested_grouped_splits
 
-# =============================================================================
-# 🌟 第一部分：顶刊级评估指标 (与 DL 绝对对齐)
-# =============================================================================
-def calculate_partial_auc(y_true, y_prob, fpr_limit=0.2):
-    """计算 FPR <= 0.2 区间内的 Partial AUC"""
-    fpr, tpr, _ = roc_curve(y_true, y_prob)
-    if fpr_limit <= 0 or fpr_limit > 1: return 0.0
-    valid_idx = np.where(fpr <= fpr_limit)[0]
-    if len(valid_idx) < 2: return 0.0
-    
-    fpr_part = fpr[valid_idx]
-    tpr_part = tpr[valid_idx]
-    
-    # 线性插值闭合边界
-    if fpr_part[-1] < fpr_limit:
-        idx_next = valid_idx[-1] + 1
-        if idx_next < len(fpr):
-            slope = (tpr[idx_next] - tpr_part[-1]) / (fpr[idx_next] - fpr_part[-1] + 1e-9)
-            tpr_interp = tpr_part[-1] + slope * (fpr_limit - fpr_part[-1])
-            fpr_part = np.append(fpr_part, fpr_limit)
-            tpr_part = np.append(tpr_part, tpr_interp)
-            
-    pauc = np.trapz(tpr_part, fpr_part)
-    return pauc / (fpr_limit * 1.0)
-
-def calculate_net_benefit(y_true, y_prob, thresholds=np.arange(0.01, 1.0, 0.01)):
-    """计算临床决策曲线 (Decision Curve Analysis, DCA) 的 Net Benefit 及 AUDC"""
-    net_benefits = []
-    n = len(y_true)
-    if n == 0: return 0.0
-    for pt in thresholds:
-        preds = (y_prob >= pt).astype(int)
-        tp = np.sum((preds == 1) & (y_true == 1))
-        fp = np.sum((preds == 1) & (y_true == 0))
-        nb = (tp / n) - (fp / n) * (pt / (1 - pt))
-        net_benefits.append(nb)
-    return np.trapz(np.maximum(net_benefits, 0), thresholds)
-
-def calculate_quantile_ece(y_true, y_prob, n_bins=10):
-    """等频分箱的校准误差 (Quantile ECE)"""
-    try:
-        bins = np.quantile(y_prob, np.linspace(0, 1, n_bins + 1))
-        bins[-1] += 1e-8 
-        binids = np.digitize(y_prob, bins) - 1
-    except:
-        bins = np.linspace(0, 1, n_bins + 1)
-        binids = np.digitize(y_prob, bins) - 1
-        
-    ece = 0.0
-    for i in range(n_bins):
-        bin_idx = binids == i
-        if np.sum(bin_idx) > 0:
-            prob_mean = np.mean(y_prob[bin_idx])
-            acc_mean = np.mean(y_true[bin_idx])
-            ece += (np.sum(bin_idx) / len(y_prob)) * np.abs(prob_mean - acc_mean)
-    return ece
-
-def calculate_sci_metrics_with_ci(
-    y_true, y_prob, n_bootstraps=1000, bootstrap_seed=DEFAULT_SEED
-):
-    """汇总所有指标并计算 Bootstrap 95% 置信区间 (完全对齐 DL 返回的 Keys)"""
-    y_true = np.array(y_true)
-    y_prob = np.array(y_prob)
-    
-    auroc = roc_auc_score(y_true, y_prob)
-    auprc = average_precision_score(y_true, y_prob)
-    brier = brier_score_loss(y_true, y_prob)
-    ece = calculate_quantile_ece(y_true, y_prob)
-    pauc = calculate_partial_auc(y_true, y_prob)
-    audc = calculate_net_benefit(y_true, y_prob)
-    
-    rng = np.random.default_rng(bootstrap_seed)
-    bootstrapped_auroc = []
-    for _ in range(n_bootstraps):
-        indices = rng.integers(0, len(y_prob), len(y_prob))
-        if len(np.unique(y_true[indices])) < 2: continue
-        bootstrapped_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
-        
-    ci_lower = np.percentile(bootstrapped_auroc, 2.5) if bootstrapped_auroc else auroc
-    ci_upper = np.percentile(bootstrapped_auroc, 97.5) if bootstrapped_auroc else auroc
-
-    return {
-        "AUROC": auroc, "AUROC_95CI_Lower": ci_lower, "AUROC_95CI_Upper": ci_upper,
-        "AUPRC": auprc, "Brier": brier, "Quantile_ECE": ece, "pAUC_0.2": pauc, "NetBenefit_AUDC": audc
-    }
+def _formal_metrics(y_true, y_prob, reference_prevalence, settings):
+    protocol = settings.evaluation_protocol
+    dca_thresholds = np.arange(
+        protocol.dca_min_threshold,
+        protocol.dca_max_threshold + protocol.dca_step / 2.0,
+        protocol.dca_step,
+    )
+    return compute_binary_metrics(
+        y_true,
+        y_prob,
+        reference_prevalence=reference_prevalence,
+        p_auc_fpr_limits=protocol.p_auc_fpr_limits,
+        risk_thresholds=protocol.risk_thresholds,
+        alert_budgets=protocol.alert_budgets,
+        dca_thresholds=dca_thresholds,
+    )
 
 # =============================================================================
 # 🌟 第三部分：数据加载与主控循环
@@ -147,7 +80,17 @@ def main(argv=None, settings=None):
     seed_everything(settings.reproducibility)
     parser = argparse.ArgumentParser(description="DILI-PLUS grouped calibrated ML baselines")
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-kind", choices=("formal", "pilot_legacy"), default="formal")
+    parser.add_argument("--max-folds", type=int, default=None)
+    parser.add_argument("--seed-index", type=int, default=0)
     args = parser.parse_args(argv)
+    if args.run_kind == "pilot_legacy" and not args.run_id.startswith("pilot_legacy"):
+        parser.error("pilot_legacy run IDs must start with 'pilot_legacy'")
+    if args.run_kind == "formal" and args.max_folds is not None:
+        parser.error("formal runs may not limit outer folds")
+    if args.max_folds is not None and args.max_folds < 1:
+        parser.error("max-folds must be positive")
+    lineage = validate_model_data_lineage(settings, args.run_kind)
     data_dir = str(settings.model_data_dir)
     report_root = run_report_dir(settings, args.run_id)
     preds_dir = report_root / "predictions"
@@ -161,7 +104,7 @@ def main(argv=None, settings=None):
     models_to_train = {
         "LogisticRegression": LogisticRegression(
             max_iter=1000,
-            class_weight='balanced',
+            class_weight=None,
             random_state=settings.reproducibility.global_seed,
         ),
         "XGBoost": XGBClassifier(
@@ -175,8 +118,15 @@ def main(argv=None, settings=None):
     }
     
     encounter_ids = df["encounter_id"].astype(str).to_numpy()
+    if "patient_id" not in df.columns or df["patient_id"].isna().any():
+        raise KeyError("Formal ML data require non-null source patient_id groups")
+    patient_ids = df["patient_id"].astype(str).to_numpy()
     labels = np.asarray(y, dtype=np.int64)
-    folds = build_nested_grouped_splits(encounter_ids, labels, settings)
+    folds = build_nested_grouped_splits(
+        encounter_ids, labels, settings, group_ids=patient_ids
+    )
+    if args.max_folds is not None:
+        folds = folds[: args.max_folds]
     data_fingerprint = dataset_fingerprint(settings)
     all_fold_results = []
     
@@ -193,10 +143,15 @@ def main(argv=None, settings=None):
                 "representation": "TF-IDF",
                 "estimator_parameters": model_obj.get_params(deep=False),
                 "selection_partition_usage": "reserved_not_used_fixed_hyperparameters",
+                "class_weighting": None,
+                "run_kind": args.run_kind,
+                "seed_index": args.seed_index,
+                "data_lineage": lineage,
             },
         )
         for split in folds:
             fold = split.fold
+            fold_started = time.perf_counter()
             
             vec_med = TfidfVectorizer(max_features=2000)
             vec_lab = TfidfVectorizer(max_features=500)
@@ -244,27 +199,8 @@ def main(argv=None, settings=None):
             )
             
             # 4. 计算大满贯指标并更新字典
-            metrics = calculate_sci_metrics_with_ci(
-                y_test,
-                test_preds_calib,
-                n_bootstraps=1000,
-                bootstrap_seed=derive_seed(
-                    settings.reproducibility.bootstrap_seed, model_name, fold
-                ),
-            )
-            metrics.update(
-                {
-                    "Model_Architecture": model_name,
-                    "Fold": fold,
-                    "Run_ID": args.run_id,
-                    "Selected_Epoch": 0,
-                    "Temperature": best_T,
-                    "Probability_Mode": "calibrated",
-                }
-            )
-            all_fold_results.append(metrics)
-            
-            print(f"   Fold {fold} | AUROC: {metrics['AUROC']:.4f} | Quantile ECE: {metrics['Quantile_ECE']:.4f}")
+            reference_prevalence = float(y_train_sub.mean())
+            fold_duration = time.perf_counter() - fold_started
             
             # 5. 持久化校准后的测试集微观概率，用于后期画阴影图
             model_pred_dir = preds_dir / model_name
@@ -272,11 +208,18 @@ def main(argv=None, settings=None):
             pred_df = pd.DataFrame(
                 {
                     "dataset_index": split.test,
+                    "encounter_id": encounter_ids[split.test],
+                    "patient_id": patient_ids[split.test],
                     "y_true": y_test,
+                    "logit_0": test_logits[:, 0],
+                    "logit_1": test_logits[:, 1],
                     "y_prob_raw": test_preds_raw,
                     "y_prob_calibrated": test_preds_calib,
                     "fold": fold,
                     "run_id": args.run_id,
+                    "run_kind": args.run_kind,
+                    "seed_index": args.seed_index,
+                    "reference_prevalence": reference_prevalence,
                 }
             )
             pred_df.to_csv(model_pred_dir / f"fold_{fold:02d}.csv", index=False)
@@ -297,6 +240,35 @@ def main(argv=None, settings=None):
                 model,
                 {"med": vec_med, "lab": vec_lab, "diagnosis": vec_diag},
                 metadata,
+            )
+
+            for probability_mode, probabilities in (
+                ("raw", test_preds_raw),
+                ("calibrated", test_preds_calib),
+            ):
+                metrics = _formal_metrics(
+                    y_test, probabilities, reference_prevalence, settings
+                )
+                metrics.update(
+                    {
+                        "Model_Architecture": model_name,
+                        "Fold": fold,
+                        "Run_ID": args.run_id,
+                        "Run_Kind": args.run_kind,
+                        "Seed_Index": args.seed_index,
+                        "Selected_Epoch": 0,
+                        "Temperature": best_T,
+                        "Probability_Mode": probability_mode,
+                        "Feature_Count": int(X_train_sub.shape[1]),
+                        "Fold_Duration_Seconds": fold_duration,
+                        "Device": "cpu",
+                    }
+                )
+                all_fold_results.append(metrics)
+            print(
+                f"   Fold {fold} | calibrated AUROC: {all_fold_results[-1]['AUROC']:.4f} | "
+                f"AUPRC: {all_fold_results[-1]['AUPRC']:.4f} | "
+                f"duration: {fold_duration:.1f}s"
             )
 
     report_path = metrics_dir / "ml_baselines.csv"

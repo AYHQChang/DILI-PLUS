@@ -675,8 +675,8 @@ def generate_table_1(settings=None) -> Path:
         },
         "output_sha256": {path.name: _sha256(path) for path in outputs},
         "limitations": [
-            "The frozen AHI-proxy cohort is preserved from the pre-Code-02 label artifact.",
-            "The aligned laboratory cache was originally linked through the source patient identifier; Table 1 does not re-link the raw laboratory table.",
+            "The formal AHI-proxy cohort uses the prespecified deterministic earliest-timestamp ALT/AST baseline rule; legacy labels are not read by this Table 1 path.",
+            "The aligned laboratory cache is the same encounter-level source used by the deterministic cohort builder; Table 1 does not create an independent outcome or laboratory-linkage path.",
             "Diagnosis flags describe records available before prediction_time, not causal comorbid effects.",
             "The department screen is descriptive and does not validate a dedicated ICU cohort.",
         ],

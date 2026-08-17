@@ -12,14 +12,25 @@ DILI-PLUS | 校准模型批量训练入口（包实现）
 import argparse
 
 from diliplus.config import load_settings
+from diliplus.evaluation.finalize import finalize_formal_run
 from diliplus.models.registry import ABLATION_ONLY_MODEL_NAMES, FORMAL_DEEP_MODEL_NAMES
 from diliplus.training.deep_trainer_calibrated import main as train_deep_model
 from diliplus.training.ml_baselines_calibrated import main as train_ml_models
 
-def run_experiments(run_id, settings=None, include_ablations=False):
+def run_experiments(
+    run_id,
+    settings=None,
+    include_ablations=False,
+    *,
+    run_kind="formal",
+    max_folds=None,
+    epochs=None,
+    deep_models=None,
+    seed_index=0,
+):
     settings = settings or load_settings()
     
-    dl_models_to_train = list(FORMAL_DEEP_MODEL_NAMES)
+    dl_models_to_train = list(deep_models or FORMAL_DEEP_MODEL_NAMES)
     if include_ablations:
         dl_models_to_train.extend(ABLATION_ONLY_MODEL_NAMES)
     
@@ -35,9 +46,17 @@ def run_experiments(run_id, settings=None, include_ablations=False):
         print(f"[LAUNCHING DL PROCESS] Calibrating DL Model: {model_name}")
         print("="*70)
         
-        train_deep_model(
-            ["--model", model_name, "--run-id", run_id], settings=settings
-        )
+        arguments = [
+            "--model", model_name,
+            "--run-id", run_id,
+            "--run-kind", run_kind,
+            "--seed-index", str(seed_index),
+        ]
+        if max_folds is not None:
+            arguments.extend(["--max-folds", str(max_folds)])
+        if epochs is not None:
+            arguments.extend(["--epochs", str(epochs)])
+        train_deep_model(arguments, settings=settings)
         print(f"\n[SUCCESS] Finished DL Model: {model_name}.\n")
 
     # =========================================================
@@ -47,13 +66,34 @@ def run_experiments(run_id, settings=None, include_ablations=False):
     print("[LAUNCHING ML PROCESS] Training Machine Learning Baselines")
     print("="*70)
     
-    train_ml_models(["--run-id", run_id], settings=settings)
+    ml_arguments = [
+        "--run-id", run_id,
+        "--run-kind", run_kind,
+        "--seed-index", str(seed_index),
+    ]
+    if max_folds is not None:
+        ml_arguments.extend(["--max-folds", str(max_folds)])
+    train_ml_models(ml_arguments, settings=settings)
     print("\n[SUCCESS] Finished ML Baselines.\n")
         
-    print("\nGLOBAL PIPELINE COMPLETE: all 6 models trained and calibrated.")
+    all_model_names = tuple(dl_models_to_train) + ("LogisticRegression", "XGBoost")
+    if run_kind == "formal" and not include_ablations and tuple(dl_models_to_train) == tuple(FORMAL_DEEP_MODEL_NAMES):
+        print("[DILI-PLUS] Finalizing pooled OOF metrics and clustered statistics...")
+        finalize_formal_run(settings, run_id, all_model_names)
+    print("\nGLOBAL PIPELINE COMPLETE: requested models trained and calibrated.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train all formal DILI-PLUS models")
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-kind", choices=("formal", "pilot_legacy"), default="formal")
+    parser.add_argument("--max-folds", type=int)
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--seed-index", type=int, default=0)
     args = parser.parse_args()
-    run_experiments(args.run_id)
+    run_experiments(
+        args.run_id,
+        run_kind=args.run_kind,
+        max_folds=args.max_folds,
+        epochs=args.epochs,
+        seed_index=args.seed_index,
+    )

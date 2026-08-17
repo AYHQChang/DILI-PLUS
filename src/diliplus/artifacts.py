@@ -51,6 +51,7 @@ def _canonical_sha256(value: Any) -> str:
 
 def dataset_fingerprint(settings) -> dict[str, Any]:
     candidates = (
+        settings.model_data_dir / "data_lineage.json",
         settings.model_data_dir / "02_dili_labels_censored.parquet",
         settings.model_data_dir / "03_dili_dual_stream_tensors.parquet",
         settings.model_data_dir / "03b_diag_tensors.parquet",
@@ -76,13 +77,27 @@ def config_snapshot(settings, training_arguments: dict[str, Any]) -> dict[str, A
     return {
         "config_path": settings.config_path.relative_to(settings.paths.root).as_posix(),
         "config_sha256": file_sha256(settings.config_path),
+        "config_sources": {
+            path.relative_to(settings.paths.root).as_posix(): file_sha256(path)
+            for path in settings.config_sources
+        },
         "prediction_gap_hours": settings.prediction.gap_hours,
+        "label_source": settings.prediction.label_source,
         "reproducibility": settings_manifest(settings.reproducibility),
         "evaluation_protocol": {
             "outer_folds": protocol.outer_folds,
             "selection_fraction": protocol.selection_fraction,
             "calibration_fraction": protocol.calibration_fraction,
             "split_search_attempts": protocol.split_search_attempts,
+            "bootstrap_replicates": protocol.bootstrap_replicates,
+            "p_auc_fpr_limits": list(protocol.p_auc_fpr_limits),
+            "risk_thresholds": list(protocol.risk_thresholds),
+            "alert_budgets": list(protocol.alert_budgets),
+            "dca_threshold_range": [
+                protocol.dca_min_threshold,
+                protocol.dca_max_threshold,
+                protocol.dca_step,
+            ],
         },
         "contract_implementation_sha256": {
             "artifacts.py": file_sha256(Path(__file__)),

@@ -2,14 +2,14 @@
 
 DILI-PLUS 是一个面向住院多重用药场景的 DILI 风险建模项目。实现代码采用 `src/` 包布局；数据构建、训练、评估、解释和论文产物分别由五个阶段入口组织。
 
-论文大修、方法变更或图表更新前，必须先阅读 [`docs/PAPER_CODE_ALIGNMENT.md`](docs/PAPER_CODE_ALIGNMENT.md)。该文档以当前正式代码为技术真值，记录了研究目标、论文—代码对应、结果证据、已知不一致和双向同步规则。同行评审意见的专业性校验、幻觉纠偏、P0/P1/P2 任务和分阶段执行计划见 [`docs/REVISION_ROADMAP_PEER_REVIEW.md`](docs/REVISION_ROADMAP_PEER_REVIEW.md)。共享医疗 DuckDB 的项目架构、已核对表接口、encounter 桥、探表方法、时间合同、验证体系和新项目复用模板见 [`docs/DUCKDB_CLINICAL_DATA_ENGINEERING_PLAYBOOK.md`](docs/DUCKDB_CLINICAL_DATA_ENGINEERING_PLAYBOOK.md)；后续使用同一数据库的新项目应先读该手册，但必须重新验证本项目特定的数据假设。
+论文大修、方法变更或图表更新前，必须先阅读 [`docs/PAPER_CODE_ALIGNMENT.md`](docs/PAPER_CODE_ALIGNMENT.md)。该文档以当前正式代码为技术真值，记录了研究目标、论文—代码对应、结果证据、已知不一致和双向同步规则。同行评审意见的专业性校验、幻觉纠偏、P0/P1/P2 任务和分阶段执行计划见 [`docs/REVISION_ROADMAP_PEER_REVIEW.md`](docs/REVISION_ROADMAP_PEER_REVIEW.md)。共享医疗 DuckDB 的项目架构、已核对表接口、encounter 桥、探表方法、时间合同、验证体系和新项目复用模板见 [`docs/DUCKDB_CLINICAL_DATA_ENGINEERING_PLAYBOOK.md`](docs/DUCKDB_CLINICAL_DATA_ENGINEERING_PLAYBOOK.md)；后续使用同一数据库的新项目应先读该手册，但必须重新验证本项目特定的数据假设。Code-10 标签、六模型、训练/校准、指标、cluster bootstrap、敏感性与结果保存合同见 [`docs/EXPERIMENT_PROTOCOL_CODE10.md`](docs/EXPERIMENT_PROTOCOL_CODE10.md)；正式训练前必须先读。
 
 ## 推荐运行方式
 
 ```powershell
 conda activate ML311
 python pipelines/01_build_dataset.py
-python pipelines/02_train_models.py --run-id dili24h_v1 --include-ablations
+python pipelines/02_train_models.py --run-id dili24h_v1
 python pipelines/03_evaluate_models.py --run-id dili24h_v1 --probability-mode calibrated
 python pipelines/04_explain_models.py --run-id dili24h_v1 --probability-mode calibrated --fold 1
 python pipelines/05_build_paper_assets.py --stages table_1
@@ -37,8 +37,9 @@ python pipelines/01_build_dataset.py --stages diagnoses diagnosis_audit vocabula
 `reports/p0_03_diagnosis_time_gap_24h/` 保存源审计和最终 Parquet 契约审计。旧模型和旧预测
 结果不能与修复后数据混用。Code-05/06 已完成分层划分、校准和 artifact 协议修复；Code-08
 已成功重建 cohort/Table 1，Code-09 已完成 strict early-warning 和最低消融执行合同。进入
-Code-10 唯一正式 run 前，仍须冻结 Code-08 暴露的 baseline ALT/AST 同时间并列项与 legacy
-标签处理决策；当前仍不应引用任何旧性能作为修复后结果。
+Code-10 已冻结确定性 baseline ALT/AST 同时间合并规则：正式标签从 aligned lab 重新构建，
+legacy 只允许显式 `pilot_legacy` 流水线试跑。正式24 h标签审计得到44,631 encounters、44,611
+patients、315 positives；在正式六模型 run 完成前仍不得引用任何旧性能作为修复后结果。
 
 需要在 VS Code 中看到完整执行过程时，使用 `Terminal -> Run Task`。当前提供诊断构建、
 Code-00/04 确定性重建、Code-04 pseudo-index 敏感性、Code-05 真实 split 审计、Code-06
@@ -77,12 +78,14 @@ worktree 的内容指纹；它不包含 patient/encounter ID。`reports/p0_04_re
 
 Checkpoint-01 已在代码提交 `2bfe6ef` 冻结 Code-00--06 的数据、split、评价和 artifact
 合同。Code-07 在该 checkpoint 之上只清理模型/损失语义和兼容边界，不生成性能结果。
-Code-08/09 的 cohort/Table 1、strict early-warning 和最低消融合同冻结在提交 `cc7d434`；该
-提交仍没有正式训练或性能结果。
+Code-08/09 的历史 cohort/Table 1、strict early-warning 和最低消融合同冻结在提交 `cc7d434`；
+Code-10 又以确定性标签正式队列更新这些 aggregate 证据。正式性能必须绑定到随后单独冻结的
+Code-10 checkpoint，不能把 `cc7d434` 视为最终训练版本。
 
 ## 评价与模型 artifact 合同
 
-Code-05 使用五折 `StratifiedGroupKFold` outer test。每个 outer-training pool 再按 patient group
+Code-05 使用五折 `StratifiedGroupKFold` outer test。Code-10 起 patient group 必须来自
+`analysis.v_patient_encounters.patient_id`，不再用 encounter 字符串前缀猜测。每个 outer-training pool 再按 patient group
 划出 15% selection 和 15% calibration：training 只拟合参数，selection 只选择 epoch，
 calibration 只拟合一个正温度，test 只执行一次最终推理。aggregate-only split 证据位于
 `manifests/code05_split_protocol.json`。
@@ -121,8 +124,9 @@ pre-Code-07 checkpoint、预测、表格和图片仍是历史证据，不能因�
 
 Code-08 以修复后的 `03_dili_dual_stream_tensors.parquet` 为唯一 cohort anchor；诊断、住院维表、
 patient profile 和 aligned baseline labs 逐阶段连接。每一步验证 schema、one-row-per-encounter、
-匹配数和 row inflation，0 匹配或 N 改变会直接失败。真实结果为 46,864 encounters、46,844
-unique patients、391 positives；完整 aggregate 证据见 `manifests/code08_cohort_table1.json`，
+匹配数和 row inflation，0 匹配或 N 改变会直接失败。Code-10 确定性重建后的正式结果为
+44,631 encounters、44,611 unique patients、315 positives；完整 aggregate 证据见
+`manifests/code08_cohort_table1.json`，
 通用排错流程见 DuckDB playbook 第 9.7 节。
 
 Code-09 使用每个事件到 prediction time 的真实时距，同时截断并清零 medication、laboratory

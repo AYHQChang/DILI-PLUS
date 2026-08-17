@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_utc": "2026-08-17T01:17:44.854078+00:00",
+  "generated_utc": "2026-08-17T05:27:01.029127+00:00",
   "scope": "Code-05 four-way grouped evaluation protocol",
   "privacy": "aggregate counts and membership hashes only; no row identifiers",
   "status": "PASS",
@@ -11,7 +11,7 @@
     "selection_fraction_of_outer_train": 0.15,
     "calibration_fraction_of_outer_train": 0.15,
     "split_search_attempts": 128,
-    "group_definition": "encounter_id prefix before first underscore",
+    "group_definition": "analysis.v_patient_encounters.patient_id",
     "roles": {
       "training": "model parameter fitting only",
       "selection": "epoch/hyperparameter selection only",
@@ -20,10 +20,10 @@
     }
   },
   "cohort": {
-    "encounters": 46864,
-    "positive": 391,
-    "negative": 46473,
-    "membership_sha256": "186C2E37BAFD2B81567469717343C43C767ECD41503105F2BE02A7D96641F7CC"
+    "encounters": 44631,
+    "positive": 315,
+    "negative": 44316,
+    "membership_sha256": "BDC731FE3E7A638069FDB68E24FBC93D8EEA6999E555FC396C0BB472EFF9BA9B"
   },
   "folds": [
     {
@@ -31,36 +31,36 @@
       "status": "PASS",
       "roles": {
         "training": {
-          "encounters": 26236,
-          "positive": 218,
-          "negative": 26018,
-          "groups": 26231,
-          "prevalence_pct": 0.830919,
-          "membership_sha256": "84D53302415A6A21849E11C29F3CE21BEAA10BCCE10FF9ED76D23D2A743B73F2"
+          "encounters": 24986,
+          "positive": 176,
+          "negative": 24810,
+          "groups": 24980,
+          "prevalence_pct": 0.704394,
+          "membership_sha256": "6C6EF333A7FA8C06483B6A9E675725A72F23C9AF813E33017F8B9CEFB23E16B0"
         },
         "selection": {
-          "encounters": 5626,
-          "positive": 47,
-          "negative": 5579,
-          "groups": 5622,
-          "prevalence_pct": 0.835407,
-          "membership_sha256": "2F1D79514996B5EFAEBD9157199F988230313E561978868593F5B7E1B6366746"
+          "encounters": 5359,
+          "positive": 38,
+          "negative": 5321,
+          "groups": 5354,
+          "prevalence_pct": 0.709088,
+          "membership_sha256": "950D3F04500ED6323DFE225E68D2F07DE5FF87C196ADA5A9E080532B1193F977"
         },
         "calibration": {
-          "encounters": 5629,
-          "positive": 47,
-          "negative": 5582,
-          "groups": 5622,
-          "prevalence_pct": 0.834962,
-          "membership_sha256": "0BE98966492992C16A65E0C66BD62AD7A753A4689BC231045EA10645A5DBB69C"
+          "encounters": 5359,
+          "positive": 38,
+          "negative": 5321,
+          "groups": 5354,
+          "prevalence_pct": 0.709088,
+          "membership_sha256": "2716BF156D72F5E197D6ED34CBA19064F9691B789A7D5DE4D926F17FB1656852"
         },
         "test": {
-          "encounters": 9373,
-          "positive": 79,
-          "negative": 9294,
-          "groups": 9369,
-          "prevalence_pct": 0.842846,
-          "membership_sha256": "73A8B69AE6A8E6B9DEBE1E31462D41C1F310ED409B2D86AA860596F86B0A9571"
+          "encounters": 8927,
+          "positive": 63,
+          "negative": 8864,
+          "groups": 8923,
+          "prevalence_pct": 0.705724,
+          "membership_sha256": "279C4B023EF5C9EBB843AEE3765DD17B033CD65573E9D886B285776C105E15B8"
         }
       },
       "index_overlap": {
@@ -86,36 +86,36 @@
       "status": "PASS",
       "roles": {
         "training": {
-          "encounters": 26236,
-          "positive": 219,
-          "negative": 26017,
-          "groups": 26231,
-          "prevalence_pct": 0.834731,
-          "membership_sha256": "2DD94E0AA5A32B213ED13A22B4859B529DBA3C2F6393072B8FBFB93FC36F34AF"
+          "encounters": 24989,
+          "positive": 176,
+          "negative": 24813,
+          "groups": 24981,
+          "prevalence_pct": 0.70431,
+          "membership_sha256": "8711A3FA5FACF19473A8EB89036F01144DC285B081CAC2D8FF86B71C04C5CC1C"
         },
         "selection": {
-          "encounters": 5628,
-          "positive": 47,
-          "negative": 5581,
-          "groups": 5622,
-          "prevalence_pct": 0.83511,
-          "membership_sha256": "51AE9498DE3C7A79B67AA0826B4A0BFE6098A13ADF5CF963BBC8868CBA5E900A"
+          "encounters": 5358,
+          "positive": 38,
+          "negative": 5320,
+          "groups": 5354,
+          "prevalence_pct": 0.70922,
+          "membership_sha256": "7E41AF3E17589B8BB0259B161D9311C120B8C30A4AB22097F2E8834B0F43ABE1"
         },
         "calibration": {
-          "encounters": 5627,
-          "positive": 47,
-          "negative": 5580,
-          "groups": 5622,
-          "prevalence_pct": 0.835259,
-          "membership_sha256": "441EC28C32EFAF49832C990A6872639B0F6A9E9C0CF06426E92860ED3CDCF427"
+          "encounters": 5358,
+          "positive": 38,
+          "negative": 5320,
+          "groups": 5354,
+          "prevalence_pct": 0.70922,
+          "membership_sha256": "02A36026691727660611F84C2D194856A30F21D9CA6A4B319FF41C506657DB1B"
         },
         "test": {
-          "encounters": 9373,
-          "positive": 78,
-          "negative": 9295,
-          "groups": 9369,
-          "prevalence_pct": 0.832178,
-          "membership_sha256": "6E35E19E14EB97AD307EEA124B65B2C3D3A8B11A7E65A5A4662043296F792A06"
+          "encounters": 8926,
+          "positive": 63,
+          "negative": 8863,
+          "groups": 8922,
+          "prevalence_pct": 0.705803,
+          "membership_sha256": "43CA2BE3E7B91874FD3E504FFC3518E4A88BB7DFEB7EF98055E895F55090F2A2"
         }
       },
       "index_overlap": {
@@ -141,36 +141,36 @@
       "status": "PASS",
       "roles": {
         "training": {
-          "encounters": 26240,
-          "positive": 219,
-          "negative": 26021,
-          "groups": 26231,
-          "prevalence_pct": 0.834604,
-          "membership_sha256": "83EF5F6FC140DB4D6E8EB0E36FD9169D5E71F3701140965B65CB21505793A602"
+          "encounters": 24984,
+          "positive": 176,
+          "negative": 24808,
+          "groups": 24981,
+          "prevalence_pct": 0.704451,
+          "membership_sha256": "1374271366EBDFA773F0E46372474E24871C8B852D962BD211E03282DF7231E3"
         },
         "selection": {
-          "encounters": 5625,
-          "positive": 47,
-          "negative": 5578,
-          "groups": 5622,
-          "prevalence_pct": 0.835556,
-          "membership_sha256": "0726CE0EB3559F65E8D444F636A24F82037AB131F864899AC99BC56B0044030D"
+          "encounters": 5361,
+          "positive": 38,
+          "negative": 5323,
+          "groups": 5354,
+          "prevalence_pct": 0.708823,
+          "membership_sha256": "AC8687C7BD0A386719AB23502DA32B1E719769EA31665921A6D85CAC829C334C"
         },
         "calibration": {
-          "encounters": 5626,
-          "positive": 47,
-          "negative": 5579,
-          "groups": 5622,
-          "prevalence_pct": 0.835407,
-          "membership_sha256": "0E40D412E2DA626BD5608BF3DA504539984537D232A9732375B4896CFD14CA5F"
+          "encounters": 5360,
+          "positive": 38,
+          "negative": 5322,
+          "groups": 5354,
+          "prevalence_pct": 0.708955,
+          "membership_sha256": "ADBD6CD7899BC20AAC2ABB54CB7597713971CFFEB4815735226A0DF740B18937"
         },
         "test": {
-          "encounters": 9373,
-          "positive": 78,
-          "negative": 9295,
-          "groups": 9369,
-          "prevalence_pct": 0.832178,
-          "membership_sha256": "8CA9F629C29F4FD89FC59ACC94D70AF4827883B700E8ABD916333F8ED7EF326B"
+          "encounters": 8926,
+          "positive": 63,
+          "negative": 8863,
+          "groups": 8922,
+          "prevalence_pct": 0.705803,
+          "membership_sha256": "529A7FB72175826BE0A82D021D651DB3A763F161C90B33112D32A032FC7CC781"
         }
       },
       "index_overlap": {
@@ -196,36 +196,36 @@
       "status": "PASS",
       "roles": {
         "training": {
-          "encounters": 26235,
-          "positive": 219,
-          "negative": 26016,
-          "groups": 26231,
-          "prevalence_pct": 0.834763,
-          "membership_sha256": "40BD9FDB2696624CB02E1C1AB9954BD900658A2F200B028247FF32A685C0D77E"
+          "encounters": 24987,
+          "positive": 176,
+          "negative": 24811,
+          "groups": 24981,
+          "prevalence_pct": 0.704366,
+          "membership_sha256": "704930998FF02144D8CDDE0D672FCB6BED3F0CC5C269FEF2428F8A275E951940"
         },
         "selection": {
-          "encounters": 5627,
-          "positive": 47,
-          "negative": 5580,
-          "groups": 5622,
-          "prevalence_pct": 0.835259,
-          "membership_sha256": "5621B30E8F62EF7F1CF39C25A25AA062AD4C842E84A5F83ADAD91144ED1269C2"
+          "encounters": 5359,
+          "positive": 38,
+          "negative": 5321,
+          "groups": 5354,
+          "prevalence_pct": 0.709088,
+          "membership_sha256": "4D6B4264BB32C1740FBF0A4DB48F418FF7B9D7A41E7D77C909731961091267DD"
         },
         "calibration": {
-          "encounters": 5629,
-          "positive": 47,
-          "negative": 5582,
-          "groups": 5622,
-          "prevalence_pct": 0.834962,
-          "membership_sha256": "4C6C39894879748C95058BC17FCF76A53E2FD6F61DFFA05BFBCC166B03CAC060"
+          "encounters": 5359,
+          "positive": 38,
+          "negative": 5321,
+          "groups": 5354,
+          "prevalence_pct": 0.709088,
+          "membership_sha256": "BBC87F5019F65B21D96463C18F16EA19A8EF16B5EA6C6F071FA374E3F6FA35FD"
         },
         "test": {
-          "encounters": 9373,
-          "positive": 78,
-          "negative": 9295,
-          "groups": 9369,
-          "prevalence_pct": 0.832178,
-          "membership_sha256": "4D5C11AAC62BBF42B369CF7FEEE62C18F064C52A94977EFB7155D4B8EF811FC7"
+          "encounters": 8926,
+          "positive": 63,
+          "negative": 8863,
+          "groups": 8922,
+          "prevalence_pct": 0.705803,
+          "membership_sha256": "8AE359C9906F78ED91DBA9E5DE7240A5BD485D9EBB93FE90B416C2131478021C"
         }
       },
       "index_overlap": {
@@ -251,36 +251,36 @@
       "status": "PASS",
       "roles": {
         "training": {
-          "encounters": 26238,
-          "positive": 219,
-          "negative": 26019,
-          "groups": 26232,
-          "prevalence_pct": 0.834667,
-          "membership_sha256": "8ED59C8C5E84869D583D5CECE82E368D165D0E615945D06F68455A8756E424B7"
+          "encounters": 24990,
+          "positive": 176,
+          "negative": 24814,
+          "groups": 24981,
+          "prevalence_pct": 0.704282,
+          "membership_sha256": "E5C3F017B6C0DFB922BFA0D7F28FBC8FEABD57B200BF9C2D89CF1F9B06AEAE74"
         },
         "selection": {
-          "encounters": 5625,
-          "positive": 47,
-          "negative": 5578,
-          "groups": 5622,
-          "prevalence_pct": 0.835556,
-          "membership_sha256": "4F72706E13B034B2CE08189C6A1136E265A33A890574DA121A459875B3CE410D"
+          "encounters": 5357,
+          "positive": 38,
+          "negative": 5319,
+          "groups": 5354,
+          "prevalence_pct": 0.709352,
+          "membership_sha256": "233886DCBB1F78237F62905CE227FDD3E671AB072EF565E3BE90B6B200D918BB"
         },
         "calibration": {
-          "encounters": 5629,
-          "positive": 47,
-          "negative": 5582,
-          "groups": 5622,
-          "prevalence_pct": 0.834962,
-          "membership_sha256": "CE2CFA1201782EB1FAF0BD1C3F04BEB715D37900572FDA264D35E189B1C619C0"
+          "encounters": 5358,
+          "positive": 38,
+          "negative": 5320,
+          "groups": 5354,
+          "prevalence_pct": 0.70922,
+          "membership_sha256": "1001F9E9EF389F92CE4AB941837443C973F0A008332F97BE90D263B7B08B8F12"
         },
         "test": {
-          "encounters": 9372,
-          "positive": 78,
-          "negative": 9294,
-          "groups": 9368,
-          "prevalence_pct": 0.832266,
-          "membership_sha256": "C6189A26B1F35067B16E386A3796EBD54B08700229937DE1AFEC5DEA2A67811D"
+          "encounters": 8926,
+          "positive": 63,
+          "negative": 8863,
+          "groups": 8922,
+          "prevalence_pct": 0.705803,
+          "membership_sha256": "834E0B50C8BDFD7434CD4B1C3563A6B825978776457C0BBD9C4164321D4D4740"
         }
       },
       "index_overlap": {
@@ -302,8 +302,8 @@
       "test_consumption_contract": "single final inference pass only"
     }
   ],
-  "all_outer_test_memberships_sha256": "CDC94EA39B3B3F37773569DEF321C37BF81F9479B61CD7F7C797C8F9F462FA35",
-  "configuration_sha256": "0E43E374C5DBFD5EC5D31708D0B8EEF354F46F5FF475A5C404C24CBE35E014C1",
-  "split_implementation_sha256": "27C257F41F6C27DC078A4B920812DEA4756A1F55C22D29760494CFD2BDA0FA6E",
-  "manifest_payload_sha256": "24EE4A1E123F576699B07B5D58FD27DCBAF710C392905B139DE944CFBD12E50D"
+  "all_outer_test_memberships_sha256": "BFDC574C861804AF8CF0DF8F61422F7A6EDBC47AA457508BB3FA801B93F46093",
+  "configuration_sha256": "5BE8A87256C518746AA7DBCFDDBC87E1B19CB0550CFE0DB411E389CB65DB85C5",
+  "split_implementation_sha256": "EE54B84DD6137ACBA57275FEEB2F6BF6853DCA03CA3A3F7124EEAAFB676B8519",
+  "manifest_payload_sha256": "19EF1FD9C4F969A2EC827C53CC7479893FD886E77D9580FC629DF0A6BC4CE073"
 }

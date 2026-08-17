@@ -23,7 +23,7 @@
         2
       ],
       "finite_logits": true,
-      "parameters": 7440002
+      "parameters": 7246594
     },
     {
       "model_name": "MedicationOnly",
@@ -38,7 +38,7 @@
         2
       ],
       "finite_logits": true,
-      "parameters": 7440002
+      "parameters": 7246594
     },
     {
       "model_name": "LaboratoryOnly",
@@ -53,7 +53,7 @@
         2
       ],
       "finite_logits": true,
-      "parameters": 7440002
+      "parameters": 7246594
     },
     {
       "model_name": "FullWithoutTimeEncoding",
@@ -68,7 +68,7 @@
         2
       ],
       "finite_logits": true,
-      "parameters": 7440002
+      "parameters": 7246594
     },
     {
       "model_name": "FullWithoutDiagnosis",
@@ -83,7 +83,7 @@
         2
       ],
       "finite_logits": true,
-      "parameters": 7440002
+      "parameters": 7246594
     },
     {
       "model_name": "TimeAwareMultimodalTransformer",
@@ -98,7 +98,7 @@
         2
       ],
       "finite_logits": true,
-      "parameters": 7440002
+      "parameters": 7246594
     }
   ],
   "shared_contract": {
@@ -117,11 +117,11 @@
     "src/diliplus/models/baselines.py": "E7C96BFBB9E37C18226E4F69D695EFA2F10031E697681E261F3E297B05CB05E7",
     "src/diliplus/data/dataset.py": "2C6227C45701D311228B40504D54C3E807258829AA6E0A95D917AA59030CFE03",
     "src/diliplus/evaluation/early_warning.py": "CCC38905F477155B45D64971803C229BED51F1AB4F188CCD0BF1E6B3B6BA3E6F",
-    "src/diliplus/training/deep_trainer_calibrated.py": "8DE5B09A24C409F474352FFBB5D45790721482CF4CFA7C643DD8C64E0D79726B",
-    "src/diliplus/training/run_all_calibrated.py": "7BD8D1CB6E3533ED10ADB869E902A93A6B116EF2D75549E0736418C95E359F46",
-    "pipelines/02_train_models.py": "8E71442C5DD252D56A34366DB9A29949E583815F63C2266B991BBDC8A6AFDF6E"
+    "src/diliplus/training/deep_trainer_calibrated.py": "6DCFA406ABB0BA20D2F26FCD367F7BAB69900A9457D617BBAA3B8C214C383A44",
+    "src/diliplus/training/run_all_calibrated.py": "67A29D5DAD6674E56C6A0147803E246FA4CECC34319CB5E4E7D0BC5247AD3A9C",
+    "pipelines/02_train_models.py": "F5FFE2989C8D2A37EFCD53B865ECA2FC39F0808F68086904EB4D9C07B0444BAE"
   },
   "training_performed": false,
   "performance_estimated": false,
-  "payload_sha256": "08420D2B8851D1FA9D313B2BCC03327E1668923D98578BEB26BE888709D01EAC"
+  "payload_sha256": "0634FD7C606D7DA2288780816D5C91248F34A792AAABA9DB73EC09757715ED71"
 }

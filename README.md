@@ -43,8 +43,9 @@ patients、315 positives。六模型单 seed/5-fold、128/8 敏感性及 primary
 稳定性均已完成；正式 aggregate 证据分别见 `manifests/code10_formal_run.json`、
 `manifests/code10_architecture_sensitivity.json` 和 `manifests/code10_seed_stability.json`。
 五个最低消融也已完成并复用主 run 的 full primary，证据见
-`manifests/code10_minimum_ablations_seed0_run.json`；early-warning 性能仍待执行。旧 checkpoint
-和旧性能不得作为修复后结果。
+`manifests/code10_minimum_ablations_seed0_run.json`。四个深度模型的 24/48/72 h strict
+early-warning 也已完成，证据见 `manifests/code09_early_warning_performance.json`；Table 2 和
+Figures 2--4 尚待重建。旧 checkpoint 和旧性能不得作为修复后结果。
 
 需要在 VS Code 中看到完整执行过程时，使用 `Terminal -> Run Task`。当前提供诊断构建、
 Code-00/04 确定性重建、Code-04 pseudo-index 敏感性、Code-05 真实 split 审计、Code-06

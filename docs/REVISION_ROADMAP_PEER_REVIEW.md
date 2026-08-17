@@ -408,19 +408,19 @@ Track B：
 - [x] P0-05 删除虚构 MTL/self-calibration，校准真实 128-d/2-layer/4-head 架构和时间公式。论文首轮降调已完成；Code-07 又从 active code 删除 AKI/MTL/tuple 并固定单任务合同，最终稿仍须同步正式新名称和无 alpha 的 loss。
 - [x] P0-06 重建 grouped train/selection/calibration/test 协议，修复 test epoch selection。Code-05 已完成并通过真实队列 split 审计。
 - [x] P0-07 保存 temperature，并用同一 logits 配对生成 raw/calibrated Figure 3。Code-06 artifact/预测合同已完成；Figure 3 仍待 Code-10 正式 run 重做。
-- [x] P0-08 修复 early-warning cutoff 语义。Code-09 已完成三模态物理截断、TextCNN mask 合同、对应折 artifact/temperature 和真实 horizon availability 审计；Figure 4 性能重跑待 Code-10 正式 artifact。
-- [x] P0-09 成功重跑 Table 1，明确 patients/encounters/setting。Code-08 已生成 46,864 encounters / 46,844 patients / 391 positives 的 aggregate 证据；论文同步和冻结标签并列项决策仍待完成。
+- [x] P0-08 修复 early-warning cutoff 语义。三模态物理截断、TextCNN mask、对应折 artifact/temperature、availability 与 24/48/72 h patient-cluster 性能均已完成；Figure 4 待按新结果重建。
+- [x] P0-09 成功重跑 Table 1，明确 patients/encounters/setting。确定性正式队列为44,631 encounters / 44,611 patients / 315 positives；论文逐格同步仍待完成。
 - [ ] P0-10 将 Figure 5/6 降级为模型审计，删除剂量、ARR、安全替换和临床建议暗示。
-- [ ] P0-11 生成唯一正式 run，替换论文全部旧数值。
-- [x] P0-12 删除 `This is TEST.` 并重写 Abstract/Conclusion。首轮论文文字已完成；正式结果数字仍待 Code-10/12 同步。
+- [ ] P0-11 唯一正式 run、敏感性、稳定性、消融与 early-warning 已全部生成；替换论文全部旧数值和图表仍待完成。
+- [x] P0-12 删除 `This is TEST.` 并重写 Abstract/Conclusion。首轮论文文字已完成；Code-10 正式数字现已具备，最终逐段同步仍待完成。
 
 ### P1：提交前必须完成
 
 - [x] P1-01 固定所有随机种子和 pseudo-index，建立 manifest/run directory。Code-00/04 已完成。
 - [x] P1-02 修复/准确描述 Focal Loss alpha。Code-07 改为 `UnweightedFocalLoss(gamma=2)`，接口不接受 alpha，也不使用类别权重。
-- [ ] P1-03 最低消融矩阵的 6 个模型合同已完成；训练与 paired comparison 待 Code-10。
-- [ ] P1-04 报告 calibration slope/intercept、Brier、NLL、QECE 细节和完整 DCA。
-- [ ] P1-05 已报告 24/48/72 h 的 N/positive/prevalence/序列与模态缺失；性能 CI 待 Code-10。
+- [x] P1-03 最低消融6项矩阵、25个新增训练 folds、复用 full primary 和 patient-cluster paired comparison 均已完成。
+- [x] P1-04 正式 manifests 已保存 calibration slope/intercept、O:E、Brier、NLL、QECE、固定阈值/告警预算和完整 DCA；论文表图同步待完成。
+- [x] P1-05 24/48/72 h 的 N/positive/prevalence/三模态可用性、性能 CI 和配对衰减均已完成。
 - [ ] P1-06 增加 cohort-level explainability 稳定性分析，或把单病例明确降为 illustration。
 - [x] P1-07 核验 MedBERT 命名和是否存在预训练。正式名改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`；确认从头训练，旧 MedBERT 名只作 Python 导入兼容。
 - [ ] P1-08 完成 TRIPOD+AI 和 PROBAST+AI 自审。
@@ -1316,3 +1316,38 @@ AUPRC 差值仅 +0.0020（CI跨0，Holm `p=1`），不支持连续时间编码�
 `p=0.03996`）。因此当前证据不支持“多模态融合和时间编码共同驱动性能提升”的旧稿主张；
 更准确的结论是药物流承担主要预测信号，而加入化验/诊断/时间模块未表现出稳定增益。下一步
 只剩 24/48/72 h early-warning 正式性能，完成前不生成最终 Figure 4。
+
+### 21.6 24/48/72 h strict early-warning 正式性能
+
+`code09_early_warning_formal_calibrated` 从 clean commit `61c2153` 启动并 **PASS**，耗时
+714.03 s（11.90 min）。四个正式深度模型均复用 `code10_formal_128d4h_seed0` 的五折
+checkpoint、test membership 和既有 temperature；没有按 horizon 重新训练或校准。12/12
+model×horizon 文件各含相同44,631 OOF rows、315 positives和44,611 patient clusters；24 h
+概率与主运行保存概率的最大差异 `2.97e-8`。输出审计
+`code09_early_warning_output_audit_vscode` **PASS**：12 prediction files、12 pooled rows、
+48 CI rows、36 primary-vs-comparator rows、32 horizon-degradation rows、120 calibration-bin
+rows和228 DCA rows均完整且哈希一致。
+
+| Model | 24 h AUPRC (95% CI) | 48 h AUPRC (95% CI) | 72 h AUPRC (95% CI) | 24/48/72 h AUROC |
+|---|---:|---:|---:|---:|
+| MultiModalTextCNN | 0.0864 (0.0667--0.1164) | **0.0354** (0.0222--0.0594) | **0.0334** (0.0201--0.0589) | 0.8456 / 0.6879 / 0.5778 |
+| MultiModalBiLSTM | 0.0800 (0.0600--0.1096) | 0.0240 (0.0154--0.0435) | 0.0193 (0.0107--0.0367) | 0.8443 / 0.6836 / 0.5603 |
+| MultimodalTransformerBaseline | 0.0699 (0.0547--0.0933) | 0.0098 (0.0087--0.0124) | 0.0070 (0.0061--0.0095) | 0.8394 / 0.6525 / 0.5226 |
+| TimeAwareMultimodalTransformer | 0.0678 (0.0538--0.0911) | 0.0167 (0.0116--0.0273) | 0.0143 (0.0091--0.0264) | 0.8480 / 0.6668 / 0.5421 |
+
+对 primary 而言，48 h 相对24 h 的 AUPRC 差值为 -0.0511（95% CI -0.0655至-0.0390），
+72 h为 -0.0535（-0.0685至-0.0414）；AUROC、Brier和NLL也均显著恶化，8-test/model family
+内 Holm-adjusted `p=0.01598`。48 h 时 primary 的 AUPRC 显著低于 TextCNN
+（差值 -0.0187，CI -0.0387至-0.0057，Holm `p=0.02398`）；72 h差值 -0.0191，CI不跨0，
+但12-test/horizon family内 Holm `p=0.05594`。primary 在48/72 h均优于无时间 Transformer
+baseline 的 AUPRC，但绝对表现仍低。
+
+更关键的是概率校准：primary 在24/48/72 h 的 Brier 为0.0081/0.0619/0.1022，NLL为
+0.0393/0.1902/0.3030，calibration slope为0.591/0.153/0.054，O:E为0.568/0.0578/0.0346。
+固定24 h temperature 在更早且更稀疏的输入上严重高估风险；不能把 48/72 h 结果解释成已
+校准的可部署风险。正确表述只能是：模型排序信号随 horizon 显著衰减，72 h 判别接近弱信号，
+且概率需要独立外部验证或预先规定的新校准策略；本实验没有证明临床获益或因果效应。
+
+正式 aggregate 证据见 `manifests/code09_early_warning_performance.json` 和
+`manifests/code09_early_warning_performance_audit.json`。至此协议中的长实验已全部完成；下一步
+是根据正式结果重建 Table 2、Figures 2--4，并逐段同步论文，而不是继续引用任何旧图或旧性能。

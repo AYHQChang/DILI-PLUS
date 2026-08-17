@@ -395,12 +395,15 @@ pre-Code-07 历史报告中的 TA-MedBERT：
 5. 0h 输入包含目标定义化验，不能称为无泄露预测基线。
 6. 72h AUROC 置信区间跨过 0.5（当前报告约 0.472–0.612），不能写成“statistically robust”而不做正式检验。
 
-Code-09 已改为使用真实 event time 对 medication/laboratory/diagnosis 三模态同步物理截断，
+Code-09 已使用真实 event time 对 medication/laboratory/diagnosis 三模态同步物理截断，
 TextCNN 也只消费全部 token 均可见的卷积窗口；当前 24 h 模型数据只允许 effective
-24/48/72 h，0/12 h 不能从已截断 artifact 重建。真实 availability audit 已通过，Code-10
-主模型 artifact 已存在，但 24/48/72 h 性能评价尚未执行，因此仍没有修复后的 Figure 4。
-在正式 early-warning 重跑前，旧 72 h 数字不能
-继续作为当前结果，更不能写“可用于预防性干预”或“已证明 72h 预警有效”。
+24/48/72 h，0/12 h 不能从已截断 artifact 重建。正式 early-warning 已复用主 run 的同一
+checkpoint、split 和 temperature 完成，12/12 model×horizon 的 24 h 预测与主 OOF 最大误差
+仅 `2.97e-8`。主模型 24/48/72 h AUPRC 为0.0678/0.0167/0.0143，AUROC 为
+0.8480/0.6668/0.5421；相对24 h的下降均经配对 patient-cluster bootstrap 显著。48/72 h 的
+O:E 仅0.0578/0.0346、calibration slope 仅0.153/0.054，说明复用24 h temperature 后概率严重
+高估且校准很差。旧 Figure 4 不能继续使用，新 Figure 4 必须显示新 CI 和 availability；即使
+72 h AUPRC 高于 prevalence，也不能写“已证明72 h预警有效”或“可用于预防性干预”。
 
 ## 10. 局部解释和扰动分析的真实含义
 
@@ -556,7 +559,7 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 ## 15. 当前建议的大修顺序
 
 1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split、版本化 artifact，以及 Code-07 模型/损失语义合同。
-2. Code-08 cohort/Table 1、Code-09 输入合同、Code-10 六模型主运行、128/8敏感性、三 seed 稳定性和最低消融均已完成；下一步执行24/48/72 h early-warning 性能。
+2. Code-08 cohort/Table 1、Code-09 strict early-warning、Code-10 六模型主运行、128/8敏感性、三 seed 稳定性和最低消融均已完成；下一步按正式 manifests 重建 Table 2 与 Figures 2--4。
 3. 论文后续统一采用 `TimeAwareMultimodalTransformer`/TA-MMT，并只保留当前实现和新实验真正支持的创新点。
 4. 用新结果重做 Table 1、Table 2、Figure 1b/1d/2/3/4。
 5. 把 Figure 5/6 降级为单病例模型审计，并改掉因果/治疗用语。
@@ -573,5 +576,6 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 | 2026-08-17 | `cc7d434` | 未修改 | 完成并冻结 Code-08/09：真实 Table 1 查询 PASS（46,864 encounters、46,844 patients、391 positives；所有 encounter-level join inflation=1），证实全院住院混合场景；24/48/72 h 三模态 strict cutoff 与 6 项最低消融合同 PASS；未训练/未估计性能，baseline lab 并列项标签决策待冻结 |
 | 2026-08-17 | `6ef982c` 后继 dirty implementation；待 Code-10 checkpoint | 未修改 | 冻结 Code-10 协议：确定性 earliest-timestamp ALT/AST 全同行规则、真实 source patient_id grouped split、AUPRC 早停、128/4主配置与128/8敏感性、六模型 raw/calibrated 同 logits、扩展指标、patient-cluster bootstrap/配对比较和完整结果 manifest；真实标签聚合审计 PASS（44,631 encounters、315 positives）；尚未正式训练 |
 | 2026-08-17 | 主训练 `22b4b59`；8头 `2b60501`；seed-1 `0d3590f`；seed-2 `8ddd65f` | 未修改 | Code-10 六模型 30/30 folds、128/8 两模型 10/10 folds、primary/TextCNN 三 seed 稳定性均 PASS；正式结果否定旧稿主模型优越性，TextCNN AUPRC 更稳定且 primary 的 Brier/NLL 在3/3 seed更差；aggregate manifests 与本地逐样本/逐折结果已保存，最低消融与 early-warning 性能待运行 |
+| 2026-08-17 | 最低消融 `283302d`；early-warning `61c2153` | 未修改 | 最低消融25 folds及30/30来源artifact审计PASS：medication-only显著优于full primary，移除时间编码无显著损失，移除诊断改善Brier/NLL；24/48/72 h strict early-warning 12/12 OOF与patient-cluster统计PASS，主模型判别显著衰减且更早horizon严重概率高估；至此正式长实验全部完成，论文表图和全文结论待按新证据重建 |
 
 以后每次完成会改变论文结论的代码修改，都应在此表增加一行。

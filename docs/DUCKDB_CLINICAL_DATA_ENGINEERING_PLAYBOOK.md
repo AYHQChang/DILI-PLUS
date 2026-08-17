@@ -606,7 +606,7 @@ source_schema_contract.csv       关系和字段合同
 
 可提交的 `manifests/code08_cohort_table1.json` 只含 aggregate counts、合同和输入/输出哈希，
 不含 patient/encounter ID。Code-10 确定性正式队列的执行记录为
-`code10_formal_table1_vscode`。新项目可以复用
+`code10_formal_table1_vscode_v2`。新项目可以复用
 “schema contract → cohort anchor → one-stage join → cardinality audit → aggregate report”框架，
 但不能直接复用本项目的表名、结局、ICD 前缀、实验室中文名称或匹配阈值。
 

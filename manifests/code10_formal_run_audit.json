@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "contract": "code10_formal_run_audit_v1",
+  "status": "PASS",
+  "run_id": "code10_formal_128d4h_seed0",
+  "training_git_commit": "22b4b59d95420fd8fbc0c669d1fa95fc01269246",
+  "training_duration_seconds": 2614.506618,
+  "formal_models": [
+    "MultiModalTextCNN",
+    "MultiModalBiLSTM",
+    "MultimodalTransformerBaseline",
+    "TimeAwareMultimodalTransformer",
+    "LogisticRegression",
+    "XGBoost"
+  ],
+  "outer_folds": 5,
+  "oof_rows_per_model": {
+    "MultiModalTextCNN": 44631,
+    "MultiModalBiLSTM": 44631,
+    "MultimodalTransformerBaseline": 44631,
+    "TimeAwareMultimodalTransformer": 44631,
+    "LogisticRegression": 44631,
+    "XGBoost": 44631
+  },
+  "oof_positive": 315,
+  "unique_patient_clusters": 44611,
+  "artifacts_and_sidecars_verified": 30,
+  "maximum_saved_probability_absolute_error": 8.457794187233247e-08,
+  "fold_level_ranking_invariance": {
+    "status": "PASS",
+    "absolute_tolerance": 1e-05,
+    "max_absolute_difference": {
+      "AUROC": 8.954651851134088e-07,
+      "AUPRC": 1.4568429915207126e-07
+    },
+    "scope": "within model/fold; pooled cross-fold ordering may change"
+  },
+  "aggregate_table_rows": {
+    "pooled_metrics": 12,
+    "bootstrap_intervals": 48,
+    "paired_comparisons": 40,
+    "resource_usage": 30
+  },
+  "formal_manifest_sha256": "146B26D4385E6F6843F693A3FC1738374FA5A4C0A063223152A3AC837F1812F9",
+  "recorded_log_sha256": "2FA3FB76C192B821ACD4DE3712134FF9445DFF406BD233B7794BB6D58CD26C3F",
+  "privacy": "aggregate counts and hashes only; no patient or encounter identifiers",
+  "payload_sha256": "CD2357028435304F4D255D2E3F645E289280B7E7E9E47D3A06A006E0611F7297"
+}

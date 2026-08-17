@@ -1201,3 +1201,39 @@ NumPy 的确定性二参数 Newton/IRLS 后，先从已保存的 9,373 条 test 
 
 正式运行必须从上述实现提交后的 clean Git checkpoint 启动。主运行顺序固定为四个深度模型
 加 Logistic Regression/XGBoost，共 6 模型 × 5 outer folds；任何 pilot 数值均不得进入论文。
+
+### 21.2 六模型单种子五折正式主运行
+
+`code10_formal_128d4h_seed0` 从 clean commit `22b4b59` 启动并 **PASS**，耗时
+2,614.51 s（43.58 min）。六个模型各生成 5 个 outer-test artifact、44,631 条 OOF 预测和
+raw/calibrated 两种概率；随后使用 44,611 个真实 patient clusters 做 1,000 次 bootstrap 和
+primary-vs-five-comparators 配对比较。汇总层更正由 clean analysis commit `ae060f3` 完成，
+只重算已保存 OOF 的 aggregate statistics，不重新训练或改变逐折预测。
+
+单个 fold 内温度缩放的 AUROC/AUPRC 最大绝对变化分别为 `8.95e-7`/`1.46e-7`，在预设
+`1e-5` 浮点容差内；保存概率由 logits/temperature 重算的最大误差为 `8.46e-8`。不同 fold
+具有不同 temperature，故 pooled OOF 的跨折排序可能改变，pooled raw/calibrated discrimination
+不要求相同。最终 `code10_formal_output_audit_vscode` 验证 30/30 artifacts、六模型 OOF
+membership、12 行 pooled metrics、48 行 CI、40 行 paired comparisons 和 30 行 resource
+usage，状态 **PASS**。
+
+校准后 pooled OOF 主结果如下；95% CI 为 patient-cluster bootstrap：
+
+| Model | AUROC (95% CI) | AUPRC (95% CI) | Brier | NLL |
+|---|---:|---:|---:|---:|
+| MultiModalTextCNN | 0.8456 (0.8229--0.8699) | 0.0864 (0.0670--0.1186) | 0.00681 | 0.03469 |
+| MultiModalBiLSTM | 0.8443 (0.8215--0.8676) | 0.0800 (0.0610--0.1078) | 0.00692 | 0.03595 |
+| MultimodalTransformerBaseline | 0.8394 (0.8138--0.8618) | 0.0699 (0.0543--0.0912) | 0.00714 | 0.03649 |
+| TimeAwareMultimodalTransformer | 0.8480 (0.8259--0.8701) | 0.0678 (0.0544--0.0917) | 0.00814 | 0.03932 |
+| LogisticRegression | **0.8781** (0.8591--0.8973) | 0.1087 (0.0852--0.1472) | **0.00661** | **0.03264** |
+| XGBoost | 0.8598 (0.8351--0.8812) | **0.1139** (0.0879--0.1510) | 0.00665 | 0.03318 |
+
+结果不支持“时间感知主模型优于基线”的旧稿叙述。primary AUPRC 比 Logistic Regression 低
+0.0409（95% CI -0.0676 至 -0.0216）且比 XGBoost 低0.0461（-0.0765 至 -0.0206），两者
+Holm-adjusted `p=0.03996`；与三个深度比较器的 AUPRC 差异在当前校正后不显著。primary 的
+Brier/NLL 也劣于五个比较器（本次 20-test/mode correction family 内 Holm-adjusted
+`p=0.03996`）。这些是单训练 seed 的内部验证结果，不能写成外部临床有效性或因果结论。
+
+按预注册选择规则，校准后 pooled AUPRC 最高的深度比较器是 `MultiModalTextCNN`
+（0.0864），因此后续三种子稳定性只比较它与 primary；不能改选另一个对主模型更有利的
+比较器。128/8 架构敏感性仍单列，不与六模型主表混合。

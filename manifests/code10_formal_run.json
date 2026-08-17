@@ -1,10 +1,12 @@
 {
   "schema_version": 1,
-  "generated_utc": "2026-08-17T06:24:04.283026+00:00",
+  "generated_utc": "2026-08-17T06:37:20.448531+00:00",
   "status": "COMPLETE",
   "run_id": "code10_formal_128d4h_seed0",
   "run_kind": "formal",
-  "git_commit": "22b4b59d95420fd8fbc0c669d1fa95fc01269246",
+  "git_commit": "ae060f3b3390ede9efc930d3fb113b582f6da6cd",
+  "training_git_commit": "22b4b59d95420fd8fbc0c669d1fa95fc01269246",
+  "analysis_git_commit": "ae060f3b3390ede9efc930d3fb113b582f6da6cd",
   "git_dirty_at_finalization": false,
   "models": [
     "MultiModalTextCNN",
@@ -19,6 +21,16 @@
   "bootstrap_replicates": 1000,
   "patient_group_source": "analysis.v_patient_encounters.patient_id",
   "selection_metric": "AUPRC",
+  "ranking_invariance": {
+    "scope": "within each model/fold only",
+    "status": "PASS",
+    "absolute_tolerance": 1e-05,
+    "max_absolute_difference": {
+      "AUROC": 8.954651851134088e-07,
+      "AUPRC": 1.456842992075824e-07
+    },
+    "pooled_note": "Fold-specific temperatures may change cross-fold ordering after OOF pooling; pooled raw and calibrated discrimination need not be equal."
+  },
   "dataset_fingerprint": {
     "files": {
       "data_cache/prediction_gap_24h/data_lineage.json": {
@@ -47,6 +59,10 @@
       }
     },
     "payload_sha256": "4771048A90EFDDED14BD42F239E6254B5F53AB6A0BD0A9475B7EF59F54E6F6EA"
+  },
+  "analysis_implementation_sha256": {
+    "src/diliplus/evaluation/finalize.py": "AD64A1A3E1857F0FC222F477505B6B52C20A6A8C716E9BFD9589EAA338E8B24C",
+    "src/diliplus/evaluation/metrics.py": "BB490C77CA30482F244A8162992506B4A1BF7D467728CFEFDB2ACE99C4863417"
   },
   "hardware": {
     "platform": "Windows-10-10.0.22000-SP0",
@@ -96,8 +112,8 @@
       "bytes": 14632
     },
     "resource_usage.csv": {
-      "sha256": "97FC19E7F865D330C66DE4863460DB9B1B04DFB48B79DE000B4DE17296C4F594",
-      "bytes": 5530
+      "sha256": "59E1011C72CC78CE16772DCE7C8ADFB88142BC70F6C46192DEB0C288C2300BEA",
+      "bytes": 2601
     },
     "TimeAwareMultimodalTransformer.csv": {
       "sha256": "27716A9EFD753824D272F8F7299EB7AA0305D06D6CE4276535636E153E43A8DF",

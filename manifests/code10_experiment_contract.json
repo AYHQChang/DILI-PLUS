@@ -2,7 +2,7 @@
   "schema_version": 1,
   "contract": "code10_formal_experiment_v1",
   "status": "PASS",
-  "git_commit_before_contract_checkpoint": "6ef982c6d3807166233c0b6e01bf414865be919a",
+  "git_commit_before_contract_checkpoint": "cb2f5041443b581d5e4d8988f600311439fa6583",
   "formal_label_source": "deterministic_rebuild",
   "legacy_label_scope": "pipeline_pilot_only",
   "target": "single-task biochemical AHI proxy; no causal DILI attribution",
@@ -149,5 +149,5 @@
   "privacy": "aggregate counts, parameter counts and hashes only; no row identifiers",
   "training_performed": false,
   "performance_estimated": false,
-  "payload_sha256": "8E09F1F64B04A7FC5DD1FBF27DF2C49026DE510E67BCFAC6DC7191FC60741A6D"
+  "payload_sha256": "D5652EC210896657F4E90CC895E9240B69C8AECE0B9029E8140CD141D9839010"
 }

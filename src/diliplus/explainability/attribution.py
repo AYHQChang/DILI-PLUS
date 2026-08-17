@@ -3,11 +3,11 @@ DILI-PLUS | 单病例药物归因与候选病例筛选（包实现）
 
 职责：在 DILI 阳性样本中结合预测概率与药物留一敏感性选择候选病例，并使用
 Layer Integrated Gradients 计算该病例用药 Token 的局部归因。
-输入：DILIPlusDataset、第一折时间感知模型权重和药物中英文映射。
+输入：DILIPlusDataset、指定 run/fold 的版本化时间感知模型 artifact 和药物映射。
 输出：候选病例状态 JSON 与 06b_Target_Patient_Attribution.csv。
 状态：当前 DILI 单任务的局部模型解释步骤。
-解释边界：LOO 与积分梯度描述模型响应，不识别药物因果效应或真实换药收益；
-概率未重新应用训练阶段的温度参数。
+解释边界：LOO 与积分梯度描述模型响应，不识别药物因果效应或真实换药收益；调用方
+必须显式选择 raw 或 calibrated 输出，且候选病例只来自 artifact 的 outer test partition。
 """
 
 import os
@@ -19,9 +19,17 @@ import numpy as np
 import pandas as pd
 from captum.attr import LayerIntegratedGradients
 
+from diliplus.artifacts import (
+    artifact_probabilities,
+    dataset_fingerprint,
+    deep_artifact_path,
+    load_deep_artifact,
+    run_report_dir,
+)
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
 from diliplus.models.diliplus_engine import DILIPlusEngine
+from diliplus.reproducibility import seed_everything
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -59,13 +67,21 @@ NON_DRUG_KEYWORDS = [
 # 🛡️ V15 架构专用 Captum 包装器
 # =============================================================================
 class DILIPlusCaptumWrapper(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, temperature=1.0, probability_mode="raw"):
         super().__init__()
         self.model = model
+        self.temperature = float(temperature)
+        self.probability_mode = probability_mode
         
     def forward(self, x_med, dt_med, mask_med, x_lab, v_lab, dt_lab, mask_lab, x_diag, mask_diag):
         outputs = self.model(x_med, dt_med, mask_med, x_lab, v_lab, dt_lab, mask_lab, x_diag, mask_diag)
-        return outputs["logits"]
+        logits = outputs["logits"]
+        return logits / self.temperature if self.probability_mode == "calibrated" else logits
+
+
+def _positive_probability(model, inputs, metadata, probability_mode):
+    logits = model(**inputs)["logits"]
+    return float(artifact_probabilities(logits, metadata, probability_mode)[0])
 
 # =============================================================================
 # 🛠️ 辅助工具函数
@@ -94,12 +110,17 @@ def is_real_drug(token_name, mapping_df):
 # =============================================================================
 # 🚀 主控引擎
 # =============================================================================
-def main(settings=None):
+def main(settings=None, run_id=None, probability_mode="calibrated", fold_idx=1):
     settings = settings or load_settings()
-    data_dir = str(settings.paths.data_cache)
+    if not run_id:
+        raise ValueError("run_id is required to resolve the model artifact")
+    if probability_mode not in ("raw", "calibrated"):
+        raise ValueError("probability_mode must be 'raw' or 'calibrated'")
+    seed_everything(settings.reproducibility)
+    data_dir = str(settings.model_data_dir)
     vocab_dir = str(settings.paths.vocab)
-    save_dir = str(settings.paths.checkpoints)
-    report_dir = str(settings.paths.reports)
+    report_dir = str(run_report_dir(settings, run_id) / "explainability")
+    os.makedirs(report_dir, exist_ok=True)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🚀 Booting DILIPLUS IG Attribution Engine | Device: {device}")
@@ -111,19 +132,28 @@ def main(settings=None):
     
     model = DILIPlusEngine(**vocab_config).to(device)
     
-    fold_idx = 1
-    weight_path = os.path.join(save_dir, f"best_calib_MultiModalTimeAwareMedBERT_Fold{fold_idx}.pth")
-    if not os.path.exists(weight_path):
-        print(f"🚨 FATAL: Weight not found at {weight_path}")
-        return
-        
-    model.load_state_dict(torch.load(weight_path, map_location=device))
+    artifact_path = deep_artifact_path(
+        settings, run_id, "MultiModalTimeAwareMedBERT", fold_idx
+    )
+    current_fingerprint = dataset_fingerprint(settings)["payload_sha256"]
+    metadata = load_deep_artifact(
+        artifact_path,
+        model,
+        map_location=device,
+        expected_run_id=run_id,
+        expected_model_name="MultiModalTimeAwareMedBERT",
+        expected_fold=fold_idx,
+        expected_dataset_fingerprint=current_fingerprint,
+    )
     model.eval()
     
-    captum_model = DILIPlusCaptumWrapper(model).to(device)
+    captum_model = DILIPlusCaptumWrapper(
+        model, metadata["temperature"], probability_mode
+    ).to(device)
     ig = LayerIntegratedGradients(captum_model, model.med_embedding)
     
     full_dataset = DILIPlusDataset(data_dir, vocab_dir)
+    eligible_test_indices = set(metadata["split"]["indices"]["test"])
     
     # -------------------------------------------------------------------------
     # 2. 基于留一扰动的候选病例筛选（模型敏感性，不是因果识别）
@@ -133,10 +163,10 @@ def main(settings=None):
     baseline_risk = 0.0
     
     if target_idx is None:
-        print(f"📡 Radar Scanning: Performing Global LOO Causal Check...")
+        print("Radar scanning outer-test cases with LOO model sensitivity...")
         candidate_list = []
         
-        for idx in range(len(full_dataset)):
+        for idx in sorted(eligible_test_indices):
             tensors = full_dataset[idx]
             label_val = tensors.get('label_dili', tensors.get('label'))
             if label_val is None or label_val.item() != 1: continue 
@@ -144,9 +174,10 @@ def main(settings=None):
             inputs = {k: v.unsqueeze(0).to(device) for k, v in tensors.items() if 'label' not in k}
             
             with torch.no_grad():
-                p_base = torch.softmax(model(**inputs)["logits"], dim=1)[0, 1].item()
-                
-            # 使用模型原始 softmax 概率筛选高分样本；此处未应用温度参数
+                p_base = _positive_probability(
+                    model, inputs, metadata, probability_mode
+                )
+
             if p_base > 0.30:
                 med_ids = tensors['x_med'].tolist()
                 if isinstance(med_ids[0], list): med_ids = med_ids[0]
@@ -168,7 +199,9 @@ def main(settings=None):
                     inputs_ablated['mask_med'] = ablated_mask
                     
                     with torch.no_grad():
-                        p_ab = torch.softmax(model(**inputs_ablated)["logits"], dim=1)[0, 1].item()
+                        p_ab = _positive_probability(
+                            model, inputs_ablated, metadata, probability_mode
+                        )
                         
                     arr = p_base - p_ab 
                     
@@ -181,8 +214,8 @@ def main(settings=None):
 
         # 若严格条件没有候选者，则进入放宽条件的后备搜索
         if not candidate_list:
-            print("🚨 Strict Radar failed. Initiating Fallback Search (Relaxing all causal constraints)...")
-            for idx in range(len(full_dataset)):
+            print("Strict sensitivity screen found no case; using the prespecified fallback screen...")
+            for idx in sorted(eligible_test_indices):
                 tensors = full_dataset[idx]
                 label_val = tensors.get('label_dili', tensors.get('label'))
                 if label_val is None or label_val.item() != 1: continue 
@@ -195,7 +228,9 @@ def main(settings=None):
                 if hits:
                     inputs = {k: v.unsqueeze(0).to(device) for k, v in tensors.items() if 'label' not in k}
                     with torch.no_grad():
-                        p_base = torch.softmax(model(**inputs)["logits"], dim=1)[0, 1].item()
+                        p_base = _positive_probability(
+                            model, inputs, metadata, probability_mode
+                        )
                     candidate_list.append({
                         'patient_idx': idx, 'p_base': p_base, 'arr': 0.0, 
                         'target_med': hits[0], 'inputs': inputs
@@ -210,7 +245,7 @@ def main(settings=None):
         candidate_list.sort(key=lambda x: x['arr'], reverse=True)
         
         print(f"\n🏆 Top Candidates Leaderboard (Max 20):")
-        print(f"{'Rank':<5} | {'Patient ID':<10} | {'Target Med':<15} | {'Base Risk':<10} | {'LOO ARR':<10}")
+        print(f"{'Rank':<5} | {'Case Index':<10} | {'Target Med':<15} | {'Base Score':<10} | {'LOO Delta':<10}")
         print("-" * 70)
         for rank, cand in enumerate(candidate_list[:20]):
             print(f"{rank+1:<5} | {cand['patient_idx']:<10} | {cand['target_med']:<15} | {cand['p_base']*100:>5.2f}%    | {cand['arr']*100:>5.2f}%")
@@ -227,16 +262,26 @@ def main(settings=None):
         sync_data = {
             "selected_patient_idx": target_idx,
             "baseline_risk": baseline_risk,
-            "identified_target": best_candidate['target_med']
+            "identified_target": best_candidate['target_med'],
+            "run_id": run_id,
+            "fold": fold_idx,
+            "probability_mode": probability_mode,
+            "artifact_metadata_sha256": metadata["metadata_payload_sha256"],
         }
         with open(os.path.join(report_dir, "06b_Selected_Patient_State.json"), "w", encoding="utf-8") as f:
             json.dump(sync_data, f, ensure_ascii=False, indent=4)
 
     else:
+        if target_idx not in eligible_test_indices:
+            raise ValueError(
+                f"Manual dataset index {target_idx} is not in outer test fold {fold_idx}"
+            )
         print(f"🎯 Loading Manual Target Patient Index: {target_idx}")
         target_tensors = {k: v.unsqueeze(0).to(device) for k, v in full_dataset[target_idx].items() if 'label' not in k}
         with torch.no_grad():
-            baseline_risk = torch.softmax(model(**target_tensors)["logits"], dim=1)[0, 1].item()
+            baseline_risk = _positive_probability(
+                model, target_tensors, metadata, probability_mode
+            )
 
     # -------------------------------------------------------------------------
     # 3. 🧠 计算积分梯度 (Integrated Gradients)
@@ -278,7 +323,7 @@ def main(settings=None):
         total_pure_attr += abs(score)
         
     attribution_records = []
-    print(f"\n{'='*70}\n📊 Patient {target_idx} Medication Attribution Report\n{'='*70}")
+    print(f"\n{'='*70}\nDataset row {target_idx} medication attribution report\n{'='*70}")
     
     for name, score in sorted(med_aggr.items(), key=lambda item: item[1], reverse=True):
         impact_pct = (score / total_pure_attr) * 100
@@ -291,7 +336,10 @@ def main(settings=None):
                 name_en = match['target_en_name'].iloc[0]
                 
         attribution_records.append({
-            'Patient_ID': target_idx,
+            'Case_Index': target_idx,
+            'Run_ID': run_id,
+            'Fold': fold_idx,
+            'Probability_Mode': probability_mode,
             'Medication_ZH': name, 
             'Medication_EN': name_en, 
             'Attribution_Score': score, 
@@ -299,7 +347,7 @@ def main(settings=None):
         })
         
         bar = "█" * int(abs(impact_pct) / 2)
-        direction = "🔴 Toxic (+)" if score > 0 else "🟢 Protective (-)"
+        direction = "Model output increasing (+)" if score > 0 else "Model output decreasing (-)"
         print(f"[{direction}] {name_en[:25]:<25} | Impact: {impact_pct:>6.2f}% | {bar}")
 
     # 5. 持久化归因结果
@@ -307,8 +355,8 @@ def main(settings=None):
     out_path = os.path.join(report_dir, "06b_Target_Patient_Attribution.csv")
     df_attr.to_csv(out_path, index=False)
     
-    print(f"\n✅ Attribution completed. Patient Index {target_idx} saved to: {out_path}")
-    print("👉 Next Step: Run 06c_explain_counterfactual.py to initiate the SandBox Substitution!")
+    print(f"\nAttribution completed. Dataset row {target_idx} saved to: {out_path}")
+    print("Next step: run the medication-token perturbation stage with the same run/fold/mode.")
 
 if __name__ == "__main__":
     main()

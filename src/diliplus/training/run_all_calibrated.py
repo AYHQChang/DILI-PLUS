@@ -9,11 +9,13 @@ DILI-PLUS | 校准模型批量训练入口（包实现）
 端到端流水线。
 """
 
+import argparse
+
 from diliplus.config import load_settings
 from diliplus.training.deep_trainer_calibrated import main as train_deep_model
 from diliplus.training.ml_baselines_calibrated import main as train_ml_models
 
-def run_experiments(settings=None):
+def run_experiments(run_id, settings=None):
     settings = settings or load_settings()
     
     dl_models_to_train = [
@@ -35,7 +37,9 @@ def run_experiments(settings=None):
         print(f"🟢 [LAUNCHING DL PROCESS] Calibrating DL Model: {model_name}")
         print("="*70)
         
-        train_deep_model(["--model", model_name], settings=settings)
+        train_deep_model(
+            ["--model", model_name, "--run-id", run_id], settings=settings
+        )
         print(f"\n✅ [SUCCESS] Finished DL Model: {model_name}.\n")
 
     # =========================================================
@@ -45,10 +49,13 @@ def run_experiments(settings=None):
     print(f"🟢 [LAUNCHING ML PROCESS] Training Machine Learning Baselines")
     print("="*70)
     
-    train_ml_models(settings=settings)
+    train_ml_models(["--run-id", run_id], settings=settings)
     print(f"\n✅ [SUCCESS] Finished ML Baselines.\n")
         
     print("\n🎉🎉🎉 GLOBAL PIPELINE COMPLETE: All 6 Models Successfully Trained & Calibrated! Ready for Visualizations! 🎉🎉🎉")
 
 if __name__ == "__main__":
-    run_experiments()
+    parser = argparse.ArgumentParser(description="Train all formal DILI-PLUS models")
+    parser.add_argument("--run-id", required=True)
+    args = parser.parse_args()
+    run_experiments(args.run_id)

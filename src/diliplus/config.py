@@ -22,6 +22,7 @@ def _resolve(root: Path, value: str | Path) -> Path:
 class ProjectPaths:
     root: Path
     data_cache: Path
+    manifests: Path
     vocab: Path
     checkpoints: Path
     reports: Path
@@ -37,6 +38,7 @@ class ProjectPaths:
         return cls(
             root=root,
             data_cache=_resolve(root, values.get("data_cache", "data_cache")),
+            manifests=_resolve(root, values.get("manifests", "manifests")),
             vocab=_resolve(root, values.get("vocab", "vocab")),
             checkpoints=_resolve(root, values.get("checkpoints", "checkpoints")),
             reports=_resolve(root, values.get("reports", "reports")),
@@ -60,16 +62,122 @@ class TrainingSettings:
 
 
 @dataclass(frozen=True)
+class PredictionSettings:
+    gap_hours: float = 24.0
+    pseudo_index_seed: int = 20260816
+    audit_horizons_hours: tuple[float, ...] = (0.0, 12.0, 24.0, 48.0, 72.0)
+
+    def __post_init__(self) -> None:
+        if self.gap_hours < 0:
+            raise ValueError("prediction.gap_hours must be non-negative")
+        if not self.audit_horizons_hours:
+            raise ValueError("prediction.audit_horizons_hours must not be empty")
+        if any(hours < 0 for hours in self.audit_horizons_hours):
+            raise ValueError("prediction audit horizons must be non-negative")
+
+
+@dataclass(frozen=True)
+class ReproducibilitySettings:
+    global_seed: int = 20260816
+    split_seed: int = 20260816
+    bootstrap_seed: int = 20260816
+    figure_seed: int = 20260816
+    deterministic_torch: bool = True
+    dataloader_num_workers: int = 0
+    pseudo_index_sensitivity_seeds: tuple[int, ...] = (
+        20260816,
+        20260817,
+        20260818,
+        20260819,
+        20260820,
+    )
+
+    def __post_init__(self) -> None:
+        if any(
+            value < 0
+            for value in (
+                self.global_seed,
+                self.split_seed,
+                self.bootstrap_seed,
+                self.figure_seed,
+            )
+        ):
+            raise ValueError("reproducibility seeds must be non-negative")
+        if self.dataloader_num_workers < 0:
+            raise ValueError("reproducibility.dataloader_num_workers must be non-negative")
+        if not self.pseudo_index_sensitivity_seeds:
+            raise ValueError("pseudo_index_sensitivity_seeds must not be empty")
+        if len(set(self.pseudo_index_sensitivity_seeds)) != len(
+            self.pseudo_index_sensitivity_seeds
+        ):
+            raise ValueError("pseudo_index_sensitivity_seeds must be unique")
+
+
+@dataclass(frozen=True)
+class EvaluationProtocolSettings:
+    outer_folds: int = 5
+    selection_fraction: float = 0.15
+    calibration_fraction: float = 0.15
+    split_search_attempts: int = 128
+
+    def __post_init__(self) -> None:
+        if self.outer_folds < 2:
+            raise ValueError("evaluation_protocol.outer_folds must be at least 2")
+        for name, value in (
+            ("selection_fraction", self.selection_fraction),
+            ("calibration_fraction", self.calibration_fraction),
+        ):
+            if not 0.0 < value < 0.5:
+                raise ValueError(f"evaluation_protocol.{name} must be between 0 and 0.5")
+        if self.selection_fraction + self.calibration_fraction >= 0.5:
+            raise ValueError(
+                "selection_fraction + calibration_fraction must leave most outer-training "
+                "data for parameter fitting"
+            )
+        if self.split_search_attempts < 1:
+            raise ValueError("evaluation_protocol.split_search_attempts must be positive")
+
+
+def _hours_tag(hours: float) -> str:
+    numeric = float(hours)
+    return str(int(numeric)) if numeric.is_integer() else str(numeric).replace(".", "p")
+
+
+@dataclass(frozen=True)
 class Settings:
     paths: ProjectPaths
     database_path: Path
     database_read_only: bool
     training: TrainingSettings
+    prediction: PredictionSettings
+    reproducibility: ReproducibilitySettings
+    evaluation_protocol: EvaluationProtocolSettings
     config_path: Path
 
     def __post_init__(self) -> None:
         if self.database_read_only is not True:
             raise ValueError("DILI-PLUS source DuckDB must remain read-only")
+
+    @property
+    def model_data_dir(self) -> Path:
+        """Leakage-corrected model data, isolated from legacy onset-time artifacts."""
+        return self.paths.data_cache / f"prediction_gap_{_hours_tag(self.prediction.gap_hours)}h"
+
+    @property
+    def prediction_audit_dir(self) -> Path:
+        return self.paths.reports / f"p0_02_prediction_gap_{_hours_tag(self.prediction.gap_hours)}h"
+
+    @property
+    def diagnosis_audit_dir(self) -> Path:
+        return self.paths.reports / f"p0_03_diagnosis_time_gap_{_hours_tag(self.prediction.gap_hours)}h"
+
+    @property
+    def reproducibility_audit_dir(self) -> Path:
+        return self.paths.reports / "p0_04_reproducibility"
+
+    @property
+    def baseline_manifest_path(self) -> Path:
+        return self.paths.manifests / "code00_code04_baseline.json"
 
 
 def load_settings(config_path: str | Path | None = None) -> Settings:
@@ -83,6 +191,9 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
 
     database = raw.get("database", {})
     training = raw.get("training", {})
+    prediction = raw.get("prediction", {})
+    reproducibility = raw.get("reproducibility", {})
+    evaluation_protocol = raw.get("evaluation_protocol", {})
     read_only = database.get("read_only", True)
     if read_only is not True:
         raise ValueError("configs/default.yaml may not enable DuckDB writes")
@@ -99,6 +210,46 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
             batch_size=int(training.get("batch_size", 256)),
             learning_rate=float(training.get("learning_rate", 1e-4)),
         ),
+        prediction=PredictionSettings(
+            gap_hours=float(prediction.get("gap_hours", 24.0)),
+            pseudo_index_seed=int(prediction.get("pseudo_index_seed", 20260816)),
+            audit_horizons_hours=tuple(
+                float(value)
+                for value in prediction.get(
+                    "audit_horizons_hours", [0.0, 12.0, 24.0, 48.0, 72.0]
+                )
+            ),
+        ),
+        reproducibility=ReproducibilitySettings(
+            global_seed=int(reproducibility.get("global_seed", 20260816)),
+            split_seed=int(reproducibility.get("split_seed", 20260816)),
+            bootstrap_seed=int(reproducibility.get("bootstrap_seed", 20260816)),
+            figure_seed=int(reproducibility.get("figure_seed", 20260816)),
+            deterministic_torch=bool(
+                reproducibility.get("deterministic_torch", True)
+            ),
+            dataloader_num_workers=int(
+                reproducibility.get("dataloader_num_workers", 0)
+            ),
+            pseudo_index_sensitivity_seeds=tuple(
+                int(value)
+                for value in reproducibility.get(
+                    "pseudo_index_sensitivity_seeds",
+                    [20260816, 20260817, 20260818, 20260819, 20260820],
+                )
+            ),
+        ),
+        evaluation_protocol=EvaluationProtocolSettings(
+            outer_folds=int(evaluation_protocol.get("outer_folds", 5)),
+            selection_fraction=float(
+                evaluation_protocol.get("selection_fraction", 0.15)
+            ),
+            calibration_fraction=float(
+                evaluation_protocol.get("calibration_fraction", 0.15)
+            ),
+            split_search_attempts=int(
+                evaluation_protocol.get("split_search_attempts", 128)
+            ),
+        ),
         config_path=resolved_config,
     )
-

@@ -18,6 +18,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import warnings
 
 from diliplus.config import load_settings
+from diliplus.reproducibility import seed_everything
 
 warnings.filterwarnings("ignore")
 
@@ -42,7 +43,7 @@ COLOR_NEG = '#99CDCE'    # DILI 阴性色
 def extract_data_topography(settings=None):
     """🌟 核心重构：100% 提取真实 Parquet 数据，剔除所有合成假数据逻辑"""
     settings = settings or load_settings()
-    tensor_path = os.path.join(settings.paths.data_cache, "03_dili_dual_stream_tensors.parquet")
+    tensor_path = os.path.join(settings.model_data_dir, "03_dili_dual_stream_tensors.parquet")
     
     print("⏳ Loading REAL dual-stream tensors from data_cache...")
     
@@ -88,6 +89,8 @@ def extract_data_topography(settings=None):
 
 def generate_landscape_figure(settings=None):
     settings = settings or load_settings()
+    seed_everything(settings.reproducibility)
+    rng = np.random.default_rng(settings.reproducibility.figure_seed)
     labels, windows, raw_features = extract_data_topography(settings)
     
     fig_dir = str(settings.paths.figures)
@@ -143,9 +146,9 @@ def generate_landscape_figure(settings=None):
     pos_windows = df_plot[df_plot['Label'] == 'DILI Positive']['Window'].values
     neg_windows = df_plot[df_plot['Label'] == 'Negative Control']['Window'].values
     
-    ax_rain.scatter(pos_windows, np.random.normal(jitter_base_pos, max_density*0.03, len(pos_windows)), 
+    ax_rain.scatter(pos_windows, rng.normal(jitter_base_pos, max_density*0.03, len(pos_windows)),
                     color=COLOR_POS, alpha=0.3, s=8, edgecolor='none')
-    ax_rain.scatter(neg_windows, np.random.normal(jitter_base_neg, max_density*0.03, len(neg_windows)), 
+    ax_rain.scatter(neg_windows, rng.normal(jitter_base_neg, max_density*0.03, len(neg_windows)),
                     color=COLOR_NEG, alpha=0.3, s=8, edgecolor='none')
                     
     ax_rain.set_ylim([-max_density * 0.45, max_density * 1.1])
@@ -175,15 +178,21 @@ def generate_landscape_figure(settings=None):
     n_sample_neg = min(1200, len(neg_idx)) 
     
     sample_idx = np.concatenate([
-        np.random.choice(pos_idx, n_sample_pos, replace=False),
-        np.random.choice(neg_idx, n_sample_neg, replace=False)
+        rng.choice(pos_idx, n_sample_pos, replace=False),
+        rng.choice(neg_idx, n_sample_neg, replace=False)
     ])
     
     X_subset = raw_features[sample_idx]
     y_subset = labels[sample_idx]
     
     # 使用真实的 TF-IDF 矩阵进行 PCA 降维与 t-SNE
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42, init='pca', learning_rate='auto')
+    tsne = TSNE(
+        n_components=2,
+        perplexity=30,
+        random_state=settings.reproducibility.figure_seed,
+        init='pca',
+        learning_rate='auto',
+    )
     X_emb = tsne.fit_transform(X_subset)
     
     mask_pos = y_subset == 1

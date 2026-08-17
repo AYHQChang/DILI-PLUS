@@ -3,23 +3,30 @@ DILI-PLUS | 药物扰动与替换敏感性沙盒（包实现）
 
 职责：读取 06b 选定病例，对候选药物执行嵌入幅度缩放和词表内 Token 替换，
 记录模型预测概率相对基线的变化轨迹。
-输入：06b 状态/归因文件、DILIPlusDataset、第一折时间感知模型权重和药物映射。
-输出：reports/06c_Counterfactual_Trajectory.csv。
+输入：run-specific 06b 状态/归因文件、DILIPlusDataset、版本化模型 artifact 和药物映射。
+输出：对应 run 的 06c_Medication_Token_Perturbation.csv。
 状态：当前 DILI 单任务的模型边界审计步骤。
 解释边界：该分析是观察性模型的扰动敏感性测试，不是反事实因果推断、药效模拟、
-临床换药建议或随机对照试验证据；概率未重新应用训练阶段的温度参数。
+临床换药建议或随机对照试验证据；调用方必须显式选择 raw 或 calibrated 输出。
 """
 
 import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import pandas as pd
 import json
 
+from diliplus.artifacts import (
+    artifact_probabilities,
+    dataset_fingerprint,
+    deep_artifact_path,
+    load_deep_artifact,
+    run_report_dir,
+)
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
 from diliplus.models.diliplus_engine import DILIPlusEngine
+from diliplus.reproducibility import seed_everything
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -85,20 +92,30 @@ def load_med_vocab(vocab_dir):
 # =============================================================================
 # 🚀 多靶点沙盒推演引擎
 # =============================================================================
-def run_targeted_counterfactual_trajectory(settings=None):
+def _positive_probability(logits, metadata, probability_mode):
+    return float(artifact_probabilities(logits, metadata, probability_mode)[0])
+
+
+def run_targeted_counterfactual_trajectory(
+    settings=None, run_id=None, probability_mode="calibrated", fold_idx=1
+):
     settings = settings or load_settings()
-    data_dir = str(settings.paths.data_cache)
+    if not run_id:
+        raise ValueError("run_id is required to resolve the model artifact")
+    if probability_mode not in ("raw", "calibrated"):
+        raise ValueError("probability_mode must be 'raw' or 'calibrated'")
+    seed_everything(settings.reproducibility)
+    data_dir = str(settings.model_data_dir)
     vocab_dir = str(settings.paths.vocab)
-    save_dir = str(settings.paths.checkpoints)
-    reports_dir = str(settings.paths.reports)
+    reports_dir = str(run_report_dir(settings, run_id) / "explainability")
     
     sync_file = os.path.join(reports_dir, "06b_Selected_Patient_State.json")
     ig_attr_file = os.path.join(reports_dir, "06b_Target_Patient_Attribution.csv")
-    output_csv = os.path.join(reports_dir, "06c_Counterfactual_Trajectory.csv")
+    output_csv = os.path.join(reports_dir, "06c_Medication_Token_Perturbation.csv")
     mapping_file = str(settings.paths.drug_mapping)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🚀 Initialising V15 Multi-Target Counterfactual Engine on {device}...")
+    print(f"Initialising medication-token perturbation engine on {device}...")
     
     if not os.path.exists(sync_file) or not os.path.exists(ig_attr_file):
         print(f"🚨 Missing prerequisite artifacts. Please ensure 06b has been executed.")
@@ -107,7 +124,17 @@ def run_targeted_counterfactual_trajectory(settings=None):
     with open(sync_file, 'r', encoding="utf-8") as f:
         state_data = json.load(f)
     target_idx = state_data["selected_patient_idx"]
-    print(f"🎯 Precision Target Locked: Patient Index {target_idx}")
+    for field, expected in (
+        ("run_id", run_id),
+        ("fold", fold_idx),
+        ("probability_mode", probability_mode),
+    ):
+        if state_data.get(field) != expected:
+            raise ValueError(
+                f"06b state {field} mismatch: expected {expected!r}, "
+                f"found {state_data.get(field)!r}"
+            )
+    print(f"Selected dataset row: {target_idx}")
 
     # =========================================================================
     # 载入中英文药物名称双向映射
@@ -129,12 +156,25 @@ def run_targeted_counterfactual_trajectory(settings=None):
     id2med, med2id = load_med_vocab(vocab_dir)
     
     model = DILIPlusEngine(**vocab_config).to(device)
-    fold_idx = 1
-    model_path = os.path.join(save_dir, f"best_calib_MultiModalTimeAwareMedBERT_Fold{fold_idx}.pth")
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model_path = deep_artifact_path(
+        settings, run_id, "MultiModalTimeAwareMedBERT", fold_idx
+    )
+    metadata = load_deep_artifact(
+        model_path,
+        model,
+        map_location=device,
+        expected_run_id=run_id,
+        expected_model_name="MultiModalTimeAwareMedBERT",
+        expected_fold=fold_idx,
+        expected_dataset_fingerprint=dataset_fingerprint(settings)["payload_sha256"],
+    )
+    if state_data.get("artifact_metadata_sha256") != metadata["metadata_payload_sha256"]:
+        raise ValueError("06b state does not refer to the loaded model artifact")
     model.eval()
 
     full_dataset = DILIPlusDataset(data_dir, vocab_dir)
+    if target_idx not in set(metadata["split"]["indices"]["test"]):
+        raise ValueError("Selected dataset row is not in the artifact outer test partition")
     target_tensors = {k: v.unsqueeze(0).to(device) for k, v in full_dataset[target_idx].items() if 'label' not in k}
     
     x_m = target_tensors['x_med']
@@ -147,9 +187,11 @@ def run_targeted_counterfactual_trajectory(settings=None):
         base_outputs = model(**target_tensors)
         h_lab_base = base_outputs["h_lab"]
         h_diag_base = base_outputs["h_diag"]
-        base_prob = F.softmax(base_outputs["logits"], dim=1)[0, 1].item()
+        base_prob = _positive_probability(
+            base_outputs["logits"], metadata, probability_mode
+        )
 
-    print(f"   - Calibrated Baseline Risk: {base_prob * 100:.2f}%")
+    print(f"   - {probability_mode} baseline model probability: {base_prob * 100:.2f}%")
 
     # =========================================================================
     # 2. 动态 LOO 探针：寻找对模型预测影响最大的药物 Token
@@ -165,7 +207,9 @@ def run_targeted_counterfactual_trajectory(settings=None):
         temp_inputs['mask_med'][0, j] = False
         
         with torch.no_grad():
-            temp_prob = F.softmax(model(**temp_inputs)["logits"], dim=1)[0, 1].item()
+            temp_prob = _positive_probability(
+                model(**temp_inputs)["logits"], metadata, probability_mode
+            )
             
         drop = base_prob - temp_prob
         if drop > max_drop:
@@ -184,12 +228,12 @@ def run_targeted_counterfactual_trajectory(settings=None):
     exclude_keywords = ['病重', '常规', '三项', '吸氧', '测定']
     df_meds = df_ig[~df_ig['Medication_ZH'].str.contains('|'.join(exclude_keywords), na=False)].copy()
 
-    # 提取致病药与保护药
+    # Positive/negative attribution describes model-output direction only.
     enhancers = df_meds[df_meds['Contribution_Pct'] > 0].sort_values('Contribution_Pct', ascending=False).head(3)
-    enhancers['Drug_Role'] = 'Risk Enhancer (Pathogenic)'
+    enhancers['Drug_Role'] = 'Model-output increasing attribution'
     
     suppressors = df_meds[df_meds['Contribution_Pct'] < 0].sort_values('Contribution_Pct', ascending=True).head(3)
-    suppressors['Drug_Role'] = 'Risk Suppressor (Protective)'
+    suppressors['Drug_Role'] = 'Model-output decreasing attribution'
     
     targets_df = pd.concat([enhancers, suppressors])
     
@@ -200,7 +244,7 @@ def run_targeted_counterfactual_trajectory(settings=None):
             'Medication_ZH': best_med_zh,
             'Medication_EN': f"[*] {best_med_en} [Max Variance]",
             'Contribution_Pct': 99.9, 
-            'Drug_Role': 'Risk Enhancer (Max Variance)'
+            'Drug_Role': 'Largest LOO model-output change'
         }])
         targets_df = pd.concat([new_row, targets_df], ignore_index=True)
 
@@ -212,7 +256,7 @@ def run_targeted_counterfactual_trajectory(settings=None):
             'Medication_ZH': state_target_zh,
             'Medication_EN': f"[*] {state_target_en} [Clinical Target]",
             'Contribution_Pct': 99.9, 
-            'Drug_Role': 'Risk Enhancer (Clinical Swap)'
+            'Drug_Role': 'Prespecified token-substitution target'
         }])
         targets_df = pd.concat([new_row, targets_df], ignore_index=True)
 
@@ -223,7 +267,7 @@ def run_targeted_counterfactual_trajectory(settings=None):
     trajectory_records = []
 
     print("\n" + "="*80)
-    print("🧪 Executing V15 Counterfactual Sandbox: Tapering & Substitution")
+    print("Executing embedding attenuation and token substitution sensitivity")
     print("=" * 80)
 
     for _, row in targets_df.iterrows():
@@ -272,22 +316,27 @@ def run_targeted_counterfactual_trajectory(settings=None):
                 h_dynamic = h_med + h_lab_base
                 h_fused = gate[:, :model.hidden_size] * h_dynamic + gate[:, model.hidden_size:] * h_fused_raw
                 
-                prob_cf = F.softmax(model.dili_head(h_fused), dim=1)[0, 1].item()
+                prob_cf = _positive_probability(
+                    model.dili_head(h_fused), metadata, probability_mode
+                )
                 
             trajectory_records.append({
-                'Patient_ID': target_idx,  
+                'Case_Index': target_idx,
+                'Run_ID': run_id,
+                'Fold': fold_idx,
+                'Probability_Mode': probability_mode,
                 'Drug_Role': drug_role,
-                'Intervention_Type': 'Dose Tapering',
+                'Perturbation_Type': 'Embedding Attenuation',
                 'Targeted_Medications': core_med_zh,
                 'Targeted_Medications_EN': med_en,
                 'Parameter': f"Alpha={alpha}",  
-                'Predicted_DILI_Risk': prob_cf * 100, 
-                'Absolute_Risk_Reduction': (base_prob - prob_cf) * 100
+                'Model_Predicted_Probability_Pct': prob_cf * 100,
+                'Delta_Predicted_Probability_Points': (prob_cf - base_prob) * 100
             })
             
-            trend = "🔺 (Escalates Risk)" if prob_cf > base_prob else "🔻 (Reduces Risk)"
+            trend = "increases model output" if prob_cf > base_prob else "decreases model output"
             if alpha == 1.0: trend = "🔹 (Baseline)"
-            print(f"   [Tapering] Presence Alpha: {alpha:>4.2f} -> DILI Risk: {prob_cf * 100:>5.2f}% | {trend}")
+            print(f"   [Embedding attenuation] alpha={alpha:>4.2f} -> probability {prob_cf * 100:>5.2f}% | {trend}")
 
         # ---------------------------------------------------------------------
         # 轨道 B：词表内药物 Token 替换
@@ -336,28 +385,32 @@ def run_targeted_counterfactual_trajectory(settings=None):
                     h_dynamic = h_med + h_lab_base
                     h_fused = gate[:, :model.hidden_size] * h_dynamic + gate[:, model.hidden_size:] * h_fused_raw
                     
-                    prob_sub = F.softmax(model.dili_head(h_fused), dim=1)[0, 1].item()
+                    prob_sub = _positive_probability(
+                        model.dili_head(h_fused), metadata, probability_mode
+                    )
                     
                 trajectory_records.append({
-                    'Patient_ID': target_idx,  
+                    'Case_Index': target_idx,
+                    'Run_ID': run_id,
+                    'Fold': fold_idx,
+                    'Probability_Mode': probability_mode,
                     'Drug_Role': drug_role,
-                    'Intervention_Type': 'Substitution',
+                    'Perturbation_Type': 'Token Substitution',
                     'Targeted_Medications': core_med_zh,
                     'Targeted_Medications_EN': med_en,
                     'Parameter': f"Swap to {safe_med_en}", 
-                    'Predicted_DILI_Risk': prob_sub * 100, 
-                    'Absolute_Risk_Reduction': (base_prob - prob_sub) * 100
+                    'Model_Predicted_Probability_Pct': prob_sub * 100,
+                    'Delta_Predicted_Probability_Points': (prob_sub - base_prob) * 100
                 })
                 
-                print(f"   ✨ [Substitution] Swapped Risk: {prob_sub * 100:>5.2f}% | 🔻 ARR: {(base_prob - prob_sub) * 100:>5.2f}%")
+                print(f"   [Token substitution] probability {prob_sub * 100:>5.2f}% | delta {(prob_sub - base_prob) * 100:>5.2f} points")
             else:
                 print(f"   ⚠️ [Substitution] Safe alternative '{safe_med_zh_ideal}' not found in vocabulary.")
 
     df_results = pd.DataFrame(trajectory_records)
     df_results.to_csv(output_csv, index=False)
     print("\n" + "=" * 80)
-    print(f"🎉 Multi-Target V15 Sandbox Complete! Trajectories Exported: {output_csv}")
-    print("🏆 EXPERIMENTS FULLY COMPLETED. YOU ARE READY TO PLOT NATURE-LEVEL FIGURES!")
+    print(f"Medication-token perturbation results saved: {output_csv}")
 
 if __name__ == "__main__":
     run_targeted_counterfactual_trajectory()

@@ -16,6 +16,7 @@ import seaborn as sns
 import warnings
 
 from diliplus.config import load_settings
+from diliplus.reproducibility import seed_everything
 
 warnings.filterwarnings("ignore")
 
@@ -43,7 +44,7 @@ def load_real_longitudinal_data(settings=None):
     """
     settings = settings or load_settings()
     labs_path = os.path.join(settings.paths.data_cache, "01_aligned_dili_labs.parquet")
-    labels_path = os.path.join(settings.paths.data_cache, "02_dili_labels_censored.parquet")
+    labels_path = os.path.join(settings.model_data_dir, "02_dili_labels_censored.parquet")
 
     if not os.path.exists(labs_path) or not os.path.exists(labels_path):
         raise FileNotFoundError("🚨 真实数据张量不存在！请先运行 01 和 02 脚本构建化验序列与标签。")
@@ -102,6 +103,7 @@ def load_real_longitudinal_data(settings=None):
 
 def generate_divergence_plot(settings=None):
     settings = settings or load_settings()
+    seed_everything(settings.reproducibility)
     fig_dir = str(settings.paths.figures)
     os.makedirs(fig_dir, exist_ok=True)
     
@@ -121,6 +123,7 @@ def generate_divergence_plot(settings=None):
         # n_boot 调小一点 (如 500) 可以在保持科学严谨的同时提升渲染速度
         sns.lineplot(data=sub_df, x='Time', y='Value', hue='Label', 
                      palette=palette, linewidth=3, errorbar=('ci', 95), n_boot=500,
+                     seed=settings.reproducibility.bootstrap_seed,
                      ax=ax, legend=(idx == 0))
         
         # 临床参考上限线 (Upper Limit of Normal, ULN)

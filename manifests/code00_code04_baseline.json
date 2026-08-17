@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "scope": "Code-00 baseline plus Code-04 deterministic controls",
+  "generated_utc": "2026-08-17T01:18:16.678586+00:00",
+  "privacy": "aggregate counts and whole-artifact hashes only; no row identifiers",
+  "worktree": {
+    "base_commit": "cb36322ffb4f55a79203af9f630fd48c4af67ebb",
+    "dirty": true,
+    "changed_path_count": 43,
+    "tracked_diff_sha256": "A39AC04B2072DB164791A398708E05D5C77809FACB258AF616C5778D15F36A1D",
+    "untracked_files": {
+      ".vscode/tasks.json": "0483D32768F68DDB1CB61515918FBFA235041768E826F49BEBE8C864D2F25FCE",
+      "docs/DUCKDB_CLINICAL_DATA_ENGINEERING_PLAYBOOK.md": "BA27A808B198C39D61C135C6FAD2C98C986AB239EBF0347FB7F54B1D198D7117",
+      "docs/PAPER_CODE_ALIGNMENT.md": "B6E3F6CAB7AAA0464FEBA511EE7529152CB0C1EF00021AA6FF0E1E329EDFC201",
+      "docs/REVISION_ROADMAP_PEER_REVIEW.md": "0AAD2D0DCE9142648CA2CDC446B701DEC2259B3EB7FB7BFBC57390D4F83EC463",
+      "scripts/audit_code05_splits.py": "2F2D8D4C974A1F9507ECE90243E8271BD9AC9488E4CEDC4EB8BF49D42BCF930F",
+      "scripts/audit_pseudo_index_sensitivity.py": "99D0F2A9101457E7C228AA2BEA9757428917FA0B549EEBFFF6DC817B9E0BC2A4",
+      "scripts/build_baseline_manifest.py": "877E8A80B43B5645D4C07F09A4395D618DD834B3B17CD0C83FAC48C052DBC108",
+      "scripts/probe_diagnosis_mapping.py": "987EA27CADE0363B980B7A38013E322893B58DF3BCF8A3185B4D322ECFE0D2CC",
+      "scripts/probe_diagnosis_schema.py": "200F7912F49368D6F534A9234F2DFDD3D8EBC6D8528DAB509160661E914F0107",
+      "scripts/probe_diagnosis_views.py": "D27DF812538F57881383E1EAD4EEE764D37AD88C50A768356B4FD5552668D12B",
+      "scripts/run_recorded.py": "F21D498B2400E8E3AD60A3067085C7FF6767E05710CFE7B13045882418FF3B0F",
+      "scripts/smoke_code06_artifact.py": "C6B7D71B526C47B580BA629FD417FC858663A536F5ED78FDF80B29D4E0EEDE7E",
+      "scripts/verify_deterministic_rebuild.py": "F1B7E07E0F16F50D92EF6990BDEE29EACDA4B4E6BCF35A1973839A9808D13ADB",
+      "src/diliplus/artifacts.py": "F794B83474D8D5AF743634BCD168391E43642DCACE9EBB045CFD5571ED459050",
+      "src/diliplus/calibration.py": "9033AC32C081736E5C2468CD78CB49816475EA9FE574923D11EA88240AF13C0F",
+      "src/diliplus/data/diagnosis_audit.py": "E31E1C6F5D40575DC5DBFC1077E787CF550AFD180DEA7C9AAC138BC29E821DBA",
+      "src/diliplus/data/temporal_audit.py": "3145DB494DD8567E9BABD174A5FECA2B0C37C0471906C7F1FFC94A9B123C8317",
+      "src/diliplus/reproducibility.py": "22FDB48CA658DA2A617AC029C0C416D0FB2F5C7966B3B3BA0A1F1801D26CD4B1",
+      "src/diliplus/reproducibility_audit.py": "BD852D7C63DE9AEC0088ACA7D333412F273DA5B078D3B9DBC6F37ECC3DCD5BD5",
+      "src/diliplus/splits.py": "27C257F41F6C27DC078A4B920812DEA4756A1F55C22D29760494CFD2BDA0FA6E",
+      "tests/test_diagnosis_time_contract.py": "46F3197750AB4ABBB10099451D1C49D4975DB38076FDE6D1709B2EF9319A436F",
+      "tests/test_prediction_time_contract.py": "FFAB1F43084E18D5A7FDD721F528F303E6699BB5189F8AFD0C7640EE448C2BE0",
+      "tests/test_reproducibility.py": "D97066A2AEC086286D08359B5B9B30F85D1627A3CF5C1BF0099F9A752C39910E",
+      "tests/test_split_and_artifact_contract.py": "41643FC09AA288219034410DE78EFC49900ACB762B816073AFFD387A218028E2"
+    },
+    "worktree_content_sha256": "3CB1058E953D46A23D86179E765E6E8D5280A81813B7751B8FC2B9687E9E0382",
+    "reconstruction_note": "The base commit plus tracked diff and untracked file hashes identify this local state; a Git commit is still required for remote reconstruction."
+  },
+  "configuration": {
+    "config_path": "configs/default.yaml",
+    "config_sha256": "0E43E374C5DBFD5EC5D31708D0B8EEF354F46F5FF475A5C404C24CBE35E014C1",
+    "prediction_gap_hours": 24.0,
+    "pseudo_index_seed": 20260816,
+    "reproducibility": {
+      "global_seed": 20260816,
+      "split_seed": 20260816,
+      "bootstrap_seed": 20260816,
+      "figure_seed": 20260816,
+      "deterministic_torch": true,
+      "dataloader_num_workers": 0,
+      "pseudo_index_sensitivity_seeds": [
+        20260816,
+        20260817,
+        20260818,
+        20260819,
+        20260820
+      ]
+    }
+  },
+  "seed_state": {
+    "global_seed": 20260816,
+    "deterministic_torch": true,
+    "pythonhashseed_environment": "20260816",
+    "cublas_workspace_config": ":4096:8",
+    "torch_cuda_available": true
+  },
+  "runtime": {
+    "python_version": "3.11.14",
+    "python_implementation": "CPython",
+    "platform": "Windows-10-10.0.22000-SP0",
+    "packages": {
+      "captum": "0.8.0",
+      "duckdb": "1.4.1",
+      "joblib": "1.5.2",
+      "matplotlib": "3.10.8",
+      "numpy": "1.26.4",
+      "pandas": "2.3.3",
+      "pyarrow": "22.0.0",
+      "PyYAML": "6.0.3",
+      "scikit-learn": "1.8.0",
+      "scipy": "1.16.3",
+      "seaborn": "0.13.2",
+      "torch": "2.11.0.dev20251216+cu128",
+      "xgboost": "3.1.3"
+    },
+    "torch_cuda_available": true,
+    "torch_cuda_version": "12.8",
+    "gpu_names": [
+      "NVIDIA GeForce RTX 5070 Ti"
+    ]
+  },
+  "source_database": {
+    "external_source": true,
+    "file_name": "medical.duckdb",
+    "read_only": true,
+    "bytes": 37306773504,
+    "mtime_ns": 1767959412808169000,
+    "content_hash_omitted": "external database is too large; schema/data artifacts are hashed"
+  },
+  "artifacts": {
+    "data_cache/01_aligned_dili_labs.parquet": {
+      "path": "data_cache/01_aligned_dili_labs.parquet",
+      "bytes": 6393019,
+      "sha256": "B7A7CEE9E2A20D29318DE0BA2AAC2F1CE36465D953A6D894FE8FEE32E246BF7B"
+    },
+    "data_cache/02_dili_labels_censored.parquet": {
+      "path": "data_cache/02_dili_labels_censored.parquet",
+      "bytes": 1028693,
+      "sha256": "DF119481399F981B4D5384076B13F7B63448CC514382AE66C8F444DFD0F3F04D"
+    },
+    "data_cache/03_dili_dual_stream_tensors.parquet": {
+      "path": "data_cache/03_dili_dual_stream_tensors.parquet",
+      "bytes": 5535381,
+      "sha256": "6DF80DDD1ABC7BFA1F368711D63FF61AD7D45CE4B0122C65C4569812800EA803"
+    },
+    "data_cache/03b_diag_tensors.parquet": {
+      "path": "data_cache/03b_diag_tensors.parquet",
+      "bytes": 20986377,
+      "sha256": "83FFBA772CFDBA73F8F00172386C7D39228DE3C403EC53AFF6CBD8CEDF9D7F20"
+    },
+    "data_cache/prediction_gap_24h/02_dili_labels_censored.parquet": {
+      "path": "data_cache/prediction_gap_24h/02_dili_labels_censored.parquet",
+      "bytes": 1221651,
+      "sha256": "21795DED819FF4F8CE6BA4C4E510212372F3B66FC7E71E6EC42DB2D2187FF091"
+    },
+    "data_cache/prediction_gap_24h/03_dili_dual_stream_tensors.parquet": {
+      "path": "data_cache/prediction_gap_24h/03_dili_dual_stream_tensors.parquet",
+      "bytes": 5585204,
+      "sha256": "9B22E55549A179E9439F8FEA749D6B7C90BF62686E754E04AFC0E22EB79A1E42"
+    },
+    "data_cache/prediction_gap_24h/03b_diag_tensors.parquet": {
+      "path": "data_cache/prediction_gap_24h/03b_diag_tensors.parquet",
+      "bytes": 1391771,
+      "sha256": "72EC45E24A795C53ABD1C38D69880A12D2D15F16E776B1ECC6FBA9C3F29F4B52"
+    },
+    "reports/p0_02_prediction_gap_24h/temporal_leakage_audit.json": {
+      "path": "reports/p0_02_prediction_gap_24h/temporal_leakage_audit.json",
+      "bytes": 1435,
+      "sha256": "71547E742E6CD1A8CDB959429567EFD5F5F244354C00CEE312B6FF2EC87A2AA4"
+    },
+    "reports/p0_03_diagnosis_time_gap_24h/diagnosis_tensor_audit.json": {
+      "path": "reports/p0_03_diagnosis_time_gap_24h/diagnosis_tensor_audit.json",
+      "bytes": 1372,
+      "sha256": "9F42C6D78E689821DDE22638CDC8F30E9F85B15337D78FEEDC98AE31217C3079"
+    },
+    "vocab/vocab_diagnosis.json": {
+      "path": "vocab/vocab_diagnosis.json",
+      "bytes": 109324,
+      "sha256": "F0C261A03F166E389C2118578880D5746B34BC60CF750F257B0850B1D7845656"
+    },
+    "vocab/vocab_polypharmacy.json": {
+      "path": "vocab/vocab_polypharmacy.json",
+      "bytes": 711229,
+      "sha256": "B456824F0ED86C12F04D4EAC33A41008D5BDDB146F51D0D7197D5D4E36A773C2"
+    }
+  },
+  "dataset_summary": {
+    "encounters": 46864,
+    "ahi_proxy_positive": 391,
+    "ahi_proxy_negative": 46473,
+    "unique_encounters": 46864,
+    "first_med_time_min": "2003-02-09T00:00:00",
+    "first_med_time_max": "2025-04-18T00:00:00",
+    "prediction_time_min": "2021-01-08T18:41:37.973151",
+    "prediction_time_max": "2025-04-19T05:30:38.842698",
+    "index_time_min": "2021-01-09T18:41:37.973151",
+    "index_time_max": "2025-04-20T05:30:38.842698",
+    "medication_events": 1370721,
+    "laboratory_events": 302178,
+    "diagnosis_events": 216220,
+    "encounters_without_pre_prediction_labs": 6998,
+    "encounters_without_pre_prediction_diagnosis": 2745,
+    "summary_sha256": "EEF1CC803EE34FCB86A569B2C6F6B5C0669F252E4DEB4108098F3BCA1B091CAD"
+  },
+  "outer_split_baseline": {
+    "status": "PASS",
+    "protocol": "current pre-Code-05 five-fold GroupKFold",
+    "group_definition": "encounter_id prefix before first underscore",
+    "n_splits": 5,
+    "encounters": 46864,
+    "unique_groups": 46844,
+    "total_group_overlap": 0,
+    "assignment_sha256": "917E7753B9AF71D5BF9C166091147DB04DD639C3BCE52F9540749C2AEA3630FF",
+    "folds": [
+      {
+        "fold": 1,
+        "train_encounters": 37491,
+        "test_encounters": 9373,
+        "train_positive": 312,
+        "test_positive": 79,
+        "train_groups": 37475,
+        "test_groups": 9369,
+        "group_overlap": 0,
+        "test_membership_sha256": "B3519D2127CE540682D51B8826FC6A85E35F438022C2AC7ECDF50394ED4CB7C9"
+      },
+      {
+        "fold": 2,
+        "train_encounters": 37491,
+        "test_encounters": 9373,
+        "train_positive": 311,
+        "test_positive": 80,
+        "train_groups": 37475,
+        "test_groups": 9369,
+        "group_overlap": 0,
+        "test_membership_sha256": "E29DD32D0A47E19832D9614F332BEC3F5BED28DD95FF603A01D6FF824B37A482"
+      },
+      {
+        "fold": 3,
+        "train_encounters": 37491,
+        "test_encounters": 9373,
+        "train_positive": 318,
+        "test_positive": 73,
+        "train_groups": 37475,
+        "test_groups": 9369,
+        "group_overlap": 0,
+        "test_membership_sha256": "84278C81A36454C3A6C5A12D33A52C123773DC31C7A57788D2CD3B6F767AC24E"
+      },
+      {
+        "fold": 4,
+        "train_encounters": 37491,
+        "test_encounters": 9373,
+        "train_positive": 307,
+        "test_positive": 84,
+        "train_groups": 37475,
+        "test_groups": 9369,
+        "group_overlap": 0,
+        "test_membership_sha256": "9991B990AFCA71F052346FBCD81DC6AD608CD319FB6784623720D37692BDB777"
+      },
+      {
+        "fold": 5,
+        "train_encounters": 37492,
+        "test_encounters": 9372,
+        "train_positive": 316,
+        "test_positive": 75,
+        "train_groups": 37476,
+        "test_groups": 9368,
+        "group_overlap": 0,
+        "test_membership_sha256": "0CFCC12C0000991C782C317DC322BC3694594EF0ED7B3F5EBED26DA44BB0AD5B"
+      }
+    ]
+  },
+  "manifest_payload_sha256": "25B91228B93B9C92EDD74ECCD299BC2FBA1D2D69C41737787D6471461A75A2A3"
+}

@@ -1,13 +1,14 @@
 """
 DILI-PLUS | 深度学习训练与后置温度缩放（包实现）
 
-职责：对四种深度模型执行五折 GroupKFold；每个外层训练折再划分训练/验证集，
-验证集同时用于早停与温度参数拟合，外层测试折用于最终评价。
+职责：对四种深度模型执行四方 grouped protocol；training 只拟合参数，selection
+只用于早停，calibration 只拟合温度，outer test 只执行一次最终 logits 推理。
 输入：DILIPlusDataset、词表和模型定义。
-输出：best_calib_*.pth、reports/predictions_calibrated/ 和校准结果表。
+输出：checkpoints/runs/<run_id>/ 下的版本化 artifact，以及同 run 的配对 raw/calibrated
+测试概率与指标。
 状态：当前 DILI 单任务的深度学习主训练路径。
 实现边界：当前模型返回单一 DILI 输出头，实际训练使用 DILI FocalLoss；文件中保留的
-AKI/多任务兼容分支不会被现行 DILIPlusEngine 激活。温度参数未写入 .pth 权重文件。
+AKI/多任务兼容分支不会被现行 DILIPlusEngine 激活。
 """
 
 import os
@@ -20,13 +21,32 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss, roc_curve
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 from torch.utils.data import DataLoader, Subset
 
+from diliplus.artifacts import (
+    build_artifact_metadata,
+    config_snapshot,
+    dataset_fingerprint,
+    deep_artifact_path,
+    run_report_dir,
+    save_deep_artifact,
+)
+from diliplus.calibration import (
+    fit_temperature,
+    probabilities_from_logits,
+)
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
 from diliplus.models.diliplus_engine import DILIPlusEngine
 from diliplus.models.baselines import MultiModalTextCNN, MultiModalBiLSTM, MultiModalBaselineMedBERT
+from diliplus.reproducibility import (
+    DEFAULT_SEED,
+    derive_seed,
+    make_torch_generator,
+    seed_dataloader_worker,
+    seed_everything,
+)
+from diliplus.splits import build_nested_grouped_splits
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -77,48 +97,6 @@ class UncertaintyMTLLoss(nn.Module):
                precision_1 * loss_1 + self.log_vars[1]
         
         return loss, loss_0.item(), loss_1.item()
-
-
-# =============================================================================
-# 🌟 修复增补：跨界温度缩放器 (DL Logits -> L-BFGS -> Scaled Probabilities)
-# =============================================================================
-class TemperatureScaler(nn.Module):
-    def __init__(self):
-        super(TemperatureScaler, self).__init__()
-        self.temperature = nn.Parameter(torch.ones(1) * 1.5)
-
-    def forward(self, logits):
-        return logits / self.temperature
-
-def fit_temperature_scaling(val_probas, val_labels):
-    eps = 1e-9
-    val_probas = np.clip(val_probas, eps, 1.0 - eps)
-    val_logits = np.stack([np.log(1 - val_probas), np.log(val_probas)], axis=1)
-    
-    logits_tensor = torch.tensor(val_logits, dtype=torch.float32)
-    labels_tensor = torch.tensor(val_labels, dtype=torch.long)
-    
-    scaler = TemperatureScaler()
-    nll_criterion = nn.CrossEntropyLoss()
-    optimizer = optim.LBFGS([scaler.temperature], lr=0.01, max_iter=50)
-    
-    def eval_closure():
-        optimizer.zero_grad()
-        loss = nll_criterion(scaler(logits_tensor), labels_tensor)
-        loss.backward()
-        return loss
-    
-    optimizer.step(eval_closure)
-    return scaler.temperature.item()
-
-def apply_temperature_scaling(test_probas, T):
-    eps = 1e-9
-    test_probas = np.clip(test_probas, eps, 1.0 - eps)
-    test_logits = np.stack([np.log(1 - test_probas), np.log(test_probas)], axis=1)
-    
-    scaled_logits = torch.tensor(test_logits, dtype=torch.float32) / T
-    calibrated_probas = torch.softmax(scaled_logits, dim=1).numpy()
-    return calibrated_probas[:, 1]
 
 
 # =============================================================================
@@ -179,7 +157,9 @@ def calculate_quantile_ece(y_true, y_prob, n_bins=10):
             ece += (np.sum(bin_idx) / len(y_prob)) * np.abs(prob_mean - acc_mean)
     return ece
 
-def calculate_sci_metrics_with_ci(y_true, y_prob, n_bootstraps=1000):
+def calculate_sci_metrics_with_ci(
+    y_true, y_prob, n_bootstraps=1000, bootstrap_seed=DEFAULT_SEED
+):
     """汇总所有指标并计算 Bootstrap 95% 置信区间"""
     y_true = np.array(y_true)
     y_prob = np.array(y_prob)
@@ -191,11 +171,10 @@ def calculate_sci_metrics_with_ci(y_true, y_prob, n_bootstraps=1000):
     pauc = calculate_partial_auc(y_true, y_prob)
     audc = calculate_net_benefit(y_true, y_prob)
     
-    rng_seed = 42
     bootstrapped_auroc = []
-    rng = np.random.RandomState(rng_seed)
+    rng = np.random.default_rng(bootstrap_seed)
     for _ in range(n_bootstraps):
-        indices = rng.randint(0, len(y_prob), len(y_prob))
+        indices = rng.integers(0, len(y_prob), len(y_prob))
         if len(np.unique(y_true[indices])) < 2: continue
         bootstrapped_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
         
@@ -244,9 +223,9 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
     return total_loss / len(dataloader)
 
 @torch.no_grad()
-def evaluate(model, dataloader, device, return_raw=False):
+def collect_logits(model, dataloader, device):
     model.eval()
-    all_preds, all_labels = [], []
+    all_logits, all_labels = [], []
     for batch in dataloader:
         inputs = {k: v.to(device) for k, v in batch.items() if 'label' not in k}
         labels_dili = batch.get('label_dili', batch.get('label')).to(device)
@@ -261,42 +240,56 @@ def evaluate(model, dataloader, device, return_raw=False):
         else:
             logits_dili = outputs
             
-        probs = torch.softmax(logits_dili, dim=1)[:, 1]
-        all_preds.extend(probs.cpu().numpy())
+        all_logits.append(logits_dili.detach().cpu().numpy())
         all_labels.extend(labels_dili.cpu().numpy())
-        
+    return np.concatenate(all_logits, axis=0), np.asarray(all_labels, dtype=np.int64)
+
+
+def evaluate(
+    model, dataloader, device, return_raw=False, bootstrap_seed=DEFAULT_SEED
+):
+    logits, all_labels = collect_logits(model, dataloader, device)
+    all_preds = probabilities_from_logits(logits, 1.0, "raw")
     if return_raw:
-        return np.array(all_preds), np.array(all_labels)
-        
-    metrics = calculate_sci_metrics_with_ci(all_labels, all_preds, n_bootstraps=100)
-    return metrics, all_preds, all_labels
+        return np.asarray(all_preds), np.asarray(all_labels)
+    metrics = calculate_sci_metrics_with_ci(
+        all_labels,
+        all_preds,
+        n_bootstraps=100,
+        bootstrap_seed=bootstrap_seed,
+    )
+    return metrics, all_preds.tolist(), all_labels.tolist()
 
 # =============================================================================
 # 🌟 第四部分：主控管线 (5折交叉验证 + 15%内部校准)
 # =============================================================================
 def main(argv=None, settings=None):
     settings = settings or load_settings()
+    seed_everything(settings.reproducibility)
     parser = argparse.ArgumentParser(description="DILIPLUS Trainer (Ultimate Calibrated Edition)")
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--epochs', type=int, default=settings.training.epochs)
     parser.add_argument('--batch_size', type=int, default=settings.training.batch_size)
     parser.add_argument('--lr', type=float, default=settings.training.learning_rate)
+    parser.add_argument('--run-id', required=True)
     args = parser.parse_args(argv)
 
     CONFIG = {
-        "data_dir": str(settings.paths.data_cache),
+        "data_dir": str(settings.model_data_dir),
         "vocab_dir": str(settings.paths.vocab),
-        "save_dir": str(settings.paths.checkpoints),
-        "report_dir": str(settings.paths.reports),
         "batch_size": args.batch_size,
         "epochs": args.epochs,
-        "lr": args.lr
+        "lr": args.lr,
+        "global_seed": settings.reproducibility.global_seed,
+        "split_seed": settings.reproducibility.split_seed,
+        "bootstrap_seed": settings.reproducibility.bootstrap_seed,
+        "dataloader_num_workers": settings.reproducibility.dataloader_num_workers,
     }
-    os.makedirs(CONFIG["save_dir"], exist_ok=True)
-    
-    # 建立校准后的预测概率存储专区
-    preds_dir = os.path.join(CONFIG["report_dir"], "predictions_calibrated")
-    os.makedirs(preds_dir, exist_ok=True)
+    report_root = run_report_dir(settings, args.run_id)
+    preds_dir = report_root / "predictions" / args.model
+    metrics_dir = report_root / "metrics"
+    preds_dir.mkdir(parents=True, exist_ok=True)
+    metrics_dir.mkdir(parents=True, exist_ok=True)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -311,29 +304,57 @@ def main(argv=None, settings=None):
     vocab_config = load_vocab_sizes(CONFIG["vocab_dir"])
     full_dataset = DILIPlusDataset(CONFIG["data_dir"], CONFIG["vocab_dir"])
     
-    # 提取患者 ID 用于 GroupKFold 物理隔离
-    groups = np.array([str(full_dataset.data.iloc[i]['encounter_id']).split('_')[0] for i in range(len(full_dataset))])
-    gkf = GroupKFold(n_splits=5)
+    encounter_ids = full_dataset.data["encounter_id"].astype(str).to_numpy()
+    labels = np.asarray(full_dataset.labels, dtype=np.int64)
+    folds = build_nested_grouped_splits(encounter_ids, labels, settings)
+    data_fingerprint = dataset_fingerprint(settings)
+    training_config = config_snapshot(
+        settings,
+        {
+            "model": args.model,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "learning_rate": args.lr,
+        },
+    )
     
     all_fold_results = []
     print(f"\n==================================================")
     print(f"🚀 Booting CALIBRATED Model (Full SCI Logic): {args.model} | Device: {device}")
     print(f"==================================================")
 
-    for fold, (train_idx, test_idx) in enumerate(gkf.split(full_dataset, groups=groups)):
-        print(f"\n--- Fold {fold+1}/5 ---")
-        
-        # 严谨的校准集拆分 (防止数据泄露)
-        train_groups = groups[train_idx]
-        gss = GroupShuffleSplit(n_splits=1, test_size=0.15, random_state=42)
-        train_sub_loc, val_loc = next(gss.split(train_idx, groups=train_groups))
-        
-        train_sub_idx = train_idx[train_sub_loc]
-        val_idx = train_idx[val_loc]
+    for split in folds:
+        fold = split.fold
+        print(f"\n--- Fold {fold}/{len(folds)} ---")
+        fold_seed = derive_seed(CONFIG["global_seed"], args.model, fold)
+        seed_everything(fold_seed, settings.reproducibility.deterministic_torch)
 
-        train_loader = DataLoader(Subset(full_dataset, train_sub_idx), batch_size=CONFIG["batch_size"], shuffle=True)
-        val_loader = DataLoader(Subset(full_dataset, val_idx), batch_size=CONFIG["batch_size"], shuffle=False)
-        test_loader = DataLoader(Subset(full_dataset, test_idx), batch_size=CONFIG["batch_size"], shuffle=False)
+        train_loader = DataLoader(
+            Subset(full_dataset, split.training),
+            batch_size=CONFIG["batch_size"],
+            shuffle=True,
+            generator=make_torch_generator(fold_seed),
+            worker_init_fn=seed_dataloader_worker,
+            num_workers=CONFIG["dataloader_num_workers"],
+        )
+        selection_loader = DataLoader(
+            Subset(full_dataset, split.selection),
+            batch_size=CONFIG["batch_size"],
+            shuffle=False,
+            num_workers=CONFIG["dataloader_num_workers"],
+        )
+        calibration_loader = DataLoader(
+            Subset(full_dataset, split.calibration),
+            batch_size=CONFIG["batch_size"],
+            shuffle=False,
+            num_workers=CONFIG["dataloader_num_workers"],
+        )
+        test_loader = DataLoader(
+            Subset(full_dataset, split.test),
+            batch_size=CONFIG["batch_size"],
+            shuffle=False,
+            num_workers=CONFIG["dataloader_num_workers"],
+        )
 
         model = model_registry[args.model](
             vocab_med_size=vocab_config["vocab_med_size"],
@@ -350,14 +371,23 @@ def main(argv=None, settings=None):
         
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3)
 
-        best_auroc = 0.0
+        best_auroc = float("-inf")
+        best_state = None
+        selected_epoch = 0
         patience_limit = 7
         patience_counter = 0
 
         # --- 阶段 1：深度学习主干训练 ---
         for epoch in range(CONFIG["epochs"]):
             train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
-            metrics, _, _ = evaluate(model, val_loader, device) 
+            metrics, _, _ = evaluate(
+                model,
+                selection_loader,
+                device,
+                bootstrap_seed=derive_seed(
+                    CONFIG["bootstrap_seed"], args.model, fold, "selection"
+                ),
+            )
             
             current_lr = optimizer.param_groups[0]['lr']
             print(f"   Ep [{epoch+1}/{CONFIG['epochs']}] LR: {current_lr:.6f} | Loss: {train_loss:.4f} | Val AUC: {metrics['AUROC']:.4f}")
@@ -366,7 +396,11 @@ def main(argv=None, settings=None):
             
             if metrics['AUROC'] > best_auroc:
                 best_auroc = metrics['AUROC']
-                torch.save(model.state_dict(), os.path.join(CONFIG["save_dir"], f"best_calib_{args.model}_Fold{fold+1}.pth"))
+                selected_epoch = epoch + 1
+                best_state = {
+                    key: value.detach().cpu().clone()
+                    for key, value in model.state_dict().items()
+                }
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -375,36 +409,78 @@ def main(argv=None, settings=None):
                 print(f"   🛑 Early Stopping triggered! No improvement for {patience_limit} epochs.")
                 break
         
-        # --- 阶段 2：后处理校准 (Temperature Scaling) ---
-        print(f"   🔄 Fitting L-BFGS Temperature Scaling on independent validation set...")
-        model.load_state_dict(torch.load(os.path.join(CONFIG["save_dir"], f"best_calib_{args.model}_Fold{fold+1}.pth")))
+        if best_state is None:
+            raise RuntimeError(f"Fold {fold} did not produce a selected checkpoint")
+        model.load_state_dict(best_state, strict=True)
+        model.to(device)
+
+        # Calibration is a separate role and is never used for epoch selection.
+        calibration_logits, calibration_labels = collect_logits(
+            model, calibration_loader, device
+        )
+        best_T = fit_temperature(calibration_logits, calibration_labels)
+        print(f"      Fold {fold} calibration temperature = {best_T:.4f}")
+
+        # The outer test loader is consumed exactly once. Raw and calibrated
+        # probabilities are two views of this same in-memory logits array.
+        test_logits, test_labels = collect_logits(model, test_loader, device)
+        test_preds_raw = probabilities_from_logits(test_logits, best_T, "raw")
+        test_preds_calib = probabilities_from_logits(test_logits, best_T, "calibrated")
         
-        # 在独立的 val_loader 提取概率并寻找最佳温度 T
-        val_preds_raw, val_labels = evaluate(model, val_loader, device, return_raw=True)
-        best_T = fit_temperature_scaling(val_preds_raw, val_labels)
-        print(f"      🌡️ Fold {fold+1} Optimized Temperature T = {best_T:.4f}")
-        
-        # --- 阶段 3：最终评价与持久化 ---
-        test_preds_raw, test_labels = evaluate(model, test_loader, device, return_raw=True)
-        # 严格使用验证集找出的 T 去缩放独立的测试集
-        test_preds_calib = apply_temperature_scaling(test_preds_raw, best_T)
-        
-        final_metrics = calculate_sci_metrics_with_ci(test_labels, test_preds_calib, n_bootstraps=1000)
-        print(f"✅ Calibrated Fold {fold+1} | AUROC: {final_metrics['AUROC']:.4f} | Quantile ECE: {final_metrics['Quantile_ECE']:.4f} | pAUC: {final_metrics['pAUC_0.2']:.4f}")
-        
-        # 落地保存
-        pred_df = pd.DataFrame({'y_true': test_labels, 'y_prob': test_preds_calib, 'fold': fold+1})
-        pred_df.to_csv(os.path.join(preds_dir, f"preds_calib_{args.model}_Fold{fold+1}.csv"), index=False)
-        
-        final_metrics.update({"Model_Architecture": args.model + "_Calibrated", "Fold": fold+1})
+        final_metrics = calculate_sci_metrics_with_ci(
+            test_labels,
+            test_preds_calib,
+            n_bootstraps=1000,
+            bootstrap_seed=derive_seed(
+                CONFIG["bootstrap_seed"], args.model, fold, "final"
+            ),
+        )
+        print(f"Calibrated Fold {fold} | AUROC: {final_metrics['AUROC']:.4f} | Quantile ECE: {final_metrics['Quantile_ECE']:.4f}")
+
+        pred_df = pd.DataFrame(
+            {
+                "dataset_index": split.test,
+                "y_true": test_labels,
+                "y_prob_raw": test_preds_raw,
+                "y_prob_calibrated": test_preds_calib,
+                "fold": fold,
+                "run_id": args.run_id,
+            }
+        )
+        pred_df.to_csv(preds_dir / f"fold_{fold:02d}.csv", index=False)
+
+        metadata = build_artifact_metadata(
+            artifact_type="torch",
+            run_id=args.run_id,
+            model_name=args.model,
+            fold=fold,
+            selected_epoch=selected_epoch,
+            temperature=best_T,
+            split_payload=split.checkpoint_payload(),
+            dataset=data_fingerprint,
+            configuration=training_config,
+        )
+        save_deep_artifact(
+            deep_artifact_path(settings, args.run_id, args.model, fold),
+            model,
+            metadata,
+        )
+
+        final_metrics.update(
+            {
+                "Model_Architecture": args.model,
+                "Fold": fold,
+                "Run_ID": args.run_id,
+                "Selected_Epoch": selected_epoch,
+                "Temperature": best_T,
+                "Probability_Mode": "calibrated",
+            }
+        )
         all_fold_results.append(final_metrics)
 
-    # --- 阶段 4：汇总结果 ---
-    report_path = os.path.join(CONFIG["report_dir"], "05_Calibrated_Results_Table.csv")
+    # One run-specific file per model; never append rows from older runs.
+    report_path = metrics_dir / f"{args.model}.csv"
     df_results = pd.DataFrame(all_fold_results)
-    if os.path.exists(report_path):
-        df_existing = pd.read_csv(report_path)
-        df_results = pd.concat([df_existing, df_results], ignore_index=True)
     df_results.to_csv(report_path, index=False)
     print(f"📊 Calibration Complete. Metrics saved to {report_path}")
 

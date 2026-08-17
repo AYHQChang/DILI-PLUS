@@ -1,31 +1,43 @@
 """
 DILI-PLUS | 温度缩放后的传统机器学习基线（包实现）
 
-职责：以 TF-IDF 表示训练 Logistic Regression 与 XGBoost；每个 GroupKFold 外层折
-内部再划分训练集和温度校准集，并仅在外层测试集报告最终指标。
+职责：以 TF-IDF 表示训练 Logistic Regression 与 XGBoost；使用与深度模型相同的
+training/selection/calibration/test 四方 grouped split，并仅对 outer test 推理一次。
 输入：03_dili_dual_stream_tensors.parquet、03b_diag_tensors.parquet。
-输出：reports/predictions_calibrated/ 和 05_Calibrated_Results_Table.csv。
+输出：run-specific 配对 raw/calibrated 预测、指标和版本化 sklearn artifact。
 状态：当前 DILI 单任务的传统机器学习主评估路径。
-说明：输出表采用追加写入，重复运行前需由调用方管理历史结果。
+说明：固定超参数基线不读取 selection partition；该分区仍保留以维持统一协议。
 """
 
 import os
+import argparse
 import pandas as pd
 import numpy as np
-import joblib
-import torch
-import torch.nn as nn
-import torch.optim as optim
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss, roc_curve
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit
+from sklearn.base import clone
 from scipy.sparse import hstack
 import warnings
 warnings.filterwarnings("ignore")
 
 from diliplus.config import load_settings
+from diliplus.reproducibility import DEFAULT_SEED, derive_seed, seed_everything
+from diliplus.artifacts import (
+    build_artifact_metadata,
+    config_snapshot,
+    dataset_fingerprint,
+    run_report_dir,
+    save_sklearn_artifact,
+    sklearn_artifact_path,
+)
+from diliplus.calibration import (
+    fit_temperature,
+    probabilities_from_logits,
+    probabilities_to_logits,
+)
+from diliplus.splits import build_nested_grouped_splits
 
 # =============================================================================
 # 🌟 第一部分：顶刊级评估指标 (与 DL 绝对对齐)
@@ -84,7 +96,9 @@ def calculate_quantile_ece(y_true, y_prob, n_bins=10):
             ece += (np.sum(bin_idx) / len(y_prob)) * np.abs(prob_mean - acc_mean)
     return ece
 
-def calculate_sci_metrics_with_ci(y_true, y_prob, n_bootstraps=1000):
+def calculate_sci_metrics_with_ci(
+    y_true, y_prob, n_bootstraps=1000, bootstrap_seed=DEFAULT_SEED
+):
     """汇总所有指标并计算 Bootstrap 95% 置信区间 (完全对齐 DL 返回的 Keys)"""
     y_true = np.array(y_true)
     y_prob = np.array(y_prob)
@@ -96,10 +110,10 @@ def calculate_sci_metrics_with_ci(y_true, y_prob, n_bootstraps=1000):
     pauc = calculate_partial_auc(y_true, y_prob)
     audc = calculate_net_benefit(y_true, y_prob)
     
-    rng = np.random.RandomState(42)
+    rng = np.random.default_rng(bootstrap_seed)
     bootstrapped_auroc = []
     for _ in range(n_bootstraps):
-        indices = rng.randint(0, len(y_prob), len(y_prob))
+        indices = rng.integers(0, len(y_prob), len(y_prob))
         if len(np.unique(y_true[indices])) < 2: continue
         bootstrapped_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
         
@@ -112,53 +126,6 @@ def calculate_sci_metrics_with_ci(y_true, y_prob, n_bootstraps=1000):
     }
 
 # =============================================================================
-# 🌟 第二部分：跨界温度缩放器 (ML Probabilities -> Logits -> L-BFGS -> Scaled Probabilities)
-# =============================================================================
-class TemperatureScaler(nn.Module):
-    def __init__(self):
-        super(TemperatureScaler, self).__init__()
-        self.temperature = nn.Parameter(torch.ones(1) * 1.5)
-
-    def forward(self, logits):
-        return logits / self.temperature
-
-def fit_temperature_scaling(val_probas, val_labels):
-    """提取 sklearn 输出的 [N, 2] 概率，利用 PyTorch L-BFGS 寻找最优 T"""
-    eps = 1e-9
-    val_probas = np.clip(val_probas, eps, 1.0 - eps)
-    val_logits = np.log(val_probas) # 逆向映射得到 [N, 2] 伪 logits
-    
-    logits_tensor = torch.tensor(val_logits, dtype=torch.float32)
-    labels_tensor = torch.tensor(val_labels, dtype=torch.long)
-    
-    scaler = TemperatureScaler()
-    nll_criterion = nn.CrossEntropyLoss()
-    optimizer = optim.LBFGS([scaler.temperature], lr=0.01, max_iter=50)
-    
-    def eval_closure():
-        optimizer.zero_grad()
-        loss = nll_criterion(scaler(logits_tensor), labels_tensor)
-        loss.backward()
-        return loss
-    
-    optimizer.step(eval_closure)
-    best_T = scaler.temperature.item()
-    print(f"      🌡️ L-BFGS Optimized Temperature T = {best_T:.4f}")
-    return best_T
-
-def apply_temperature_scaling(test_probas, T):
-    """使用最优温度 T 缩放测试集概率"""
-    eps = 1e-9
-    test_probas = np.clip(test_probas, eps, 1.0 - eps)
-    test_logits = np.log(test_probas)
-    
-    scaled_logits = torch.tensor(test_logits, dtype=torch.float32) / T
-    calibrated_probas = torch.softmax(scaled_logits, dim=1).numpy()
-    
-    # 返回阳性类的预测概率 [:, 1]
-    return calibrated_probas[:, 1]
-
-# =============================================================================
 # 🌟 第三部分：数据加载与主控循环
 # =============================================================================
 def load_and_flatten_data(data_dir):
@@ -166,9 +133,6 @@ def load_and_flatten_data(data_dir):
     df_med_lab = pd.read_parquet(os.path.join(data_dir, "03_dili_dual_stream_tensors.parquet"))
     df_diag = pd.read_parquet(os.path.join(data_dir, "03b_diag_tensors.parquet"))
     df = pd.merge(df_med_lab, df_diag, on='encounter_id', how='left')
-    
-    # 提取用于 GroupKFold 隔离的标识
-    df['health_reco'] = df['encounter_id'].astype(str).apply(lambda x: x.split('_')[0])
     
     def to_string(x):
         return " ".join([str(i) for i in x]) if isinstance(x, (list, np.ndarray)) else ""
@@ -178,39 +142,59 @@ def load_and_flatten_data(data_dir):
     df['diag_str'] = df['icd_codes'].apply(to_string)
     return df
 
-def main(settings=None):
+def main(argv=None, settings=None):
     settings = settings or load_settings()
-    data_dir = str(settings.paths.data_cache)
-    save_dir = str(settings.paths.checkpoints)
-    report_dir = str(settings.paths.reports)
-    preds_dir = os.path.join(report_dir, "predictions_calibrated")
-    
-    os.makedirs(save_dir, exist_ok=True)
-    os.makedirs(preds_dir, exist_ok=True)
+    seed_everything(settings.reproducibility)
+    parser = argparse.ArgumentParser(description="DILI-PLUS grouped calibrated ML baselines")
+    parser.add_argument("--run-id", required=True)
+    args = parser.parse_args(argv)
+    data_dir = str(settings.model_data_dir)
+    report_root = run_report_dir(settings, args.run_id)
+    preds_dir = report_root / "predictions"
+    metrics_dir = report_root / "metrics"
+    preds_dir.mkdir(parents=True, exist_ok=True)
+    metrics_dir.mkdir(parents=True, exist_ok=True)
     
     df = load_and_flatten_data(data_dir)
-    groups = df['health_reco'].values
     y = df['label_dili'].values
     
     models_to_train = {
-        "LogisticRegression": LogisticRegression(max_iter=1000, class_weight='balanced'),
-        "XGBoost": XGBClassifier(n_estimators=200, max_depth=6, learning_rate=0.1, eval_metric='logloss')
+        "LogisticRegression": LogisticRegression(
+            max_iter=1000,
+            class_weight='balanced',
+            random_state=settings.reproducibility.global_seed,
+        ),
+        "XGBoost": XGBClassifier(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            eval_metric='logloss',
+            random_state=settings.reproducibility.global_seed,
+            n_jobs=1,
+        )
     }
     
+    encounter_ids = df["encounter_id"].astype(str).to_numpy()
+    labels = np.asarray(y, dtype=np.int64)
+    folds = build_nested_grouped_splits(encounter_ids, labels, settings)
+    data_fingerprint = dataset_fingerprint(settings)
     all_fold_results = []
-    gkf = GroupKFold(n_splits=5)
     
     print(f"🚀 [ML Baseline] Starting 5-Fold Evaluation with Temperature Scaling...")
     for model_name, model_obj in models_to_train.items():
         print(f"\n{'='*50}\nEvaluating Model: {model_name}\n{'='*50}")
         
-        for fold, (train_idx, test_idx) in enumerate(gkf.split(df, y, groups)):
-            
-            # 🔥 与 DL 严格对齐：切出 15% 内部验证集用于拟合温度 T，杜绝数据泄露
-            train_groups = groups[train_idx]
-            gss = GroupShuffleSplit(n_splits=1, test_size=0.15, random_state=42)
-            train_sub_loc, val_loc = next(gss.split(train_idx, groups=train_groups))
-            train_sub_idx, val_idx = train_idx[train_sub_loc], train_idx[val_loc]
+        model_config = config_snapshot(
+            settings,
+            {
+                "model": model_name,
+                "representation": "TF-IDF",
+                "estimator_parameters": model_obj.get_params(deep=False),
+                "selection_partition_usage": "reserved_not_used_fixed_hyperparameters",
+            },
+        )
+        for split in folds:
+            fold = split.fold
             
             vec_med = TfidfVectorizer(max_features=2000)
             vec_lab = TfidfVectorizer(max_features=500)
@@ -218,64 +202,105 @@ def main(settings=None):
             
             # 拟合并转换训练主干集
             X_train_sub = hstack([
-                vec_med.fit_transform(df.iloc[train_sub_idx]['med_str']),
-                vec_lab.fit_transform(df.iloc[train_sub_idx]['lab_str']),
-                vec_diag.fit_transform(df.iloc[train_sub_idx]['diag_str'])
+                vec_med.fit_transform(df.iloc[split.training]['med_str']),
+                vec_lab.fit_transform(df.iloc[split.training]['lab_str']),
+                vec_diag.fit_transform(df.iloc[split.training]['diag_str'])
             ])
-            y_train_sub = y[train_sub_idx]
+            y_train_sub = y[split.training]
             
             # 仅转换验证集
-            X_val = hstack([
-                vec_med.transform(df.iloc[val_idx]['med_str']),
-                vec_lab.transform(df.iloc[val_idx]['lab_str']),
-                vec_diag.transform(df.iloc[val_idx]['diag_str'])
+            X_calibration = hstack([
+                vec_med.transform(df.iloc[split.calibration]['med_str']),
+                vec_lab.transform(df.iloc[split.calibration]['lab_str']),
+                vec_diag.transform(df.iloc[split.calibration]['diag_str'])
             ])
-            y_val = y[val_idx]
+            y_calibration = y[split.calibration]
             
             # 仅转换测试集
             X_test = hstack([
-                vec_med.transform(df.iloc[test_idx]['med_str']),
-                vec_lab.transform(df.iloc[test_idx]['lab_str']),
-                vec_diag.transform(df.iloc[test_idx]['diag_str'])
+                vec_med.transform(df.iloc[split.test]['med_str']),
+                vec_lab.transform(df.iloc[split.test]['lab_str']),
+                vec_diag.transform(df.iloc[split.test]['diag_str'])
             ])
-            y_test = y[test_idx]
+            y_test = y[split.test]
             
             # 1. 训练基线模型
-            model = model_obj
+            model = clone(model_obj)
             model.fit(X_train_sub, y_train_sub)
             
             # 2. 在验证集上提取概率并寻找最佳温度 T
-            val_probas = model.predict_proba(X_val) # 输出形状 [N, 2]
-            best_T = fit_temperature_scaling(val_probas, y_val)
+            calibration_probas = model.predict_proba(X_calibration)
+            calibration_logits = probabilities_to_logits(calibration_probas)
+            best_T = fit_temperature(calibration_logits, y_calibration)
             
             # 3. 在测试集上进行预测，并应用最优温度进行平滑校准
-            test_probas_raw = model.predict_proba(X_test)
-            test_preds_calib = apply_temperature_scaling(test_probas_raw, best_T)
+            test_probas_once = model.predict_proba(X_test)
+            test_logits = probabilities_to_logits(test_probas_once)
+            test_preds_raw = probabilities_from_logits(test_logits, best_T, "raw")
+            test_preds_calib = probabilities_from_logits(
+                test_logits, best_T, "calibrated"
+            )
             
             # 4. 计算大满贯指标并更新字典
-            metrics = calculate_sci_metrics_with_ci(y_test, test_preds_calib, n_bootstraps=1000)
-            metrics.update({"Model_Architecture": model_name + "_Calibrated", "Fold": fold + 1})
+            metrics = calculate_sci_metrics_with_ci(
+                y_test,
+                test_preds_calib,
+                n_bootstraps=1000,
+                bootstrap_seed=derive_seed(
+                    settings.reproducibility.bootstrap_seed, model_name, fold
+                ),
+            )
+            metrics.update(
+                {
+                    "Model_Architecture": model_name,
+                    "Fold": fold,
+                    "Run_ID": args.run_id,
+                    "Selected_Epoch": 0,
+                    "Temperature": best_T,
+                    "Probability_Mode": "calibrated",
+                }
+            )
             all_fold_results.append(metrics)
             
-            print(f"   ✅ Fold {fold+1} | AUROC: {metrics['AUROC']:.4f} | Quantile ECE: {metrics['Quantile_ECE']:.4f} | pAUC: {metrics['pAUC_0.2']:.4f}")
+            print(f"   Fold {fold} | AUROC: {metrics['AUROC']:.4f} | Quantile ECE: {metrics['Quantile_ECE']:.4f}")
             
             # 5. 持久化校准后的测试集微观概率，用于后期画阴影图
-            pred_df = pd.DataFrame({'y_true': y_test, 'y_prob': test_preds_calib, 'fold': fold+1})
-            pred_df.to_csv(os.path.join(preds_dir, f"preds_calib_{model_name}_Fold{fold+1}.csv"), index=False)
+            model_pred_dir = preds_dir / model_name
+            model_pred_dir.mkdir(parents=True, exist_ok=True)
+            pred_df = pd.DataFrame(
+                {
+                    "dataset_index": split.test,
+                    "y_true": y_test,
+                    "y_prob_raw": test_preds_raw,
+                    "y_prob_calibrated": test_preds_calib,
+                    "fold": fold,
+                    "run_id": args.run_id,
+                }
+            )
+            pred_df.to_csv(model_pred_dir / f"fold_{fold:02d}.csv", index=False)
 
-    # =============================================================================
-    # 🌟 统一追加汇入主表！(使用 pd.concat 追加模式，绝不覆盖)
-    # =============================================================================
-    report_path = os.path.join(report_dir, "05_Calibrated_Results_Table.csv")
+            metadata = build_artifact_metadata(
+                artifact_type="sklearn",
+                run_id=args.run_id,
+                model_name=model_name,
+                fold=fold,
+                selected_epoch=0,
+                temperature=best_T,
+                split_payload=split.checkpoint_payload(),
+                dataset=data_fingerprint,
+                configuration=model_config,
+            )
+            save_sklearn_artifact(
+                sklearn_artifact_path(settings, args.run_id, model_name, fold),
+                model,
+                {"med": vec_med, "lab": vec_lab, "diagnosis": vec_diag},
+                metadata,
+            )
+
+    report_path = metrics_dir / "ml_baselines.csv"
     df_results = pd.DataFrame(all_fold_results)
-    
-    if os.path.exists(report_path):
-        df_existing = pd.read_csv(report_path)
-        # 将本次 ML 产生的 10 行数据追加到 DL 产生的 20 行数据下方
-        df_results = pd.concat([df_existing, df_results], ignore_index=True)
-        
     df_results.to_csv(report_path, index=False)
-    print(f"\n✅ Calibrated ML Baselines successfully appended to {report_path}")
+    print(f"\nCalibrated ML baseline metrics saved to {report_path}")
 
 if __name__ == "__main__":
     main()

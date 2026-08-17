@@ -52,7 +52,7 @@ def calc_smd_categorical(group1, group2):
 
 def generate_table_1(settings=None):
     settings = settings or load_settings()
-    data_dir = str(settings.paths.data_cache)
+    data_dir = str(settings.model_data_dir)
     reports_dir = str(settings.paths.reports)
     os.makedirs(reports_dir, exist_ok=True)
     

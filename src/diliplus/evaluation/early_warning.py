@@ -3,11 +3,11 @@ DILI-PLUS | DILI 提前预警时间窗评估（包实现）
 
 职责：在五折测试集上遮蔽序列终点前 0、24、48、72 小时的动态事件，比较四种
 深度模型的 AUROC、AUPRC、校准与决策曲线指标随预警时间的变化。
-输入：DILIPlusDataset 和 best_calib_*.pth 权重。
+输入：DILIPlusDataset 和指定 run ID 的版本化模型 artifact。
 输出：reports/06a_Early_Warning_Decay_Results.csv。
 状态：当前 DILI 单任务的时间窗敏感性评估脚本。
-实现边界：.pth 只保存模型参数，不包含温度缩放参数，因此本脚本输出的是模型原始
-softmax 概率；TextCNN 不消费时间掩码，其时间窗结果需在后续逻辑修正后再解释。
+实现边界：调用方必须显式选择 raw 或 calibrated 概率；TextCNN 与逐 horizon 诊断/动态
+截断仍需在 Code-09 修正后再解释。
 """
 
 import os
@@ -16,13 +16,19 @@ import numpy as np
 import pandas as pd
 import warnings
 from sklearn.metrics import average_precision_score, roc_auc_score, brier_score_loss, roc_curve
-from sklearn.model_selection import GroupKFold
 from torch.utils.data import DataLoader, Subset
 
+from diliplus.artifacts import (
+    artifact_probabilities,
+    dataset_fingerprint,
+    deep_artifact_path,
+    load_deep_artifact,
+)
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
 from diliplus.models.diliplus_engine import DILIPlusEngine
 from diliplus.models.baselines import MultiModalBiLSTM, MultiModalBaselineMedBERT, MultiModalTextCNN
+from diliplus.reproducibility import DEFAULT_SEED, derive_seed, seed_everything
 
 warnings.filterwarnings("ignore")
 
@@ -75,7 +81,9 @@ def calculate_quantile_ece(y_true, y_prob, n_bins=10):
             ece += (np.sum(bin_idx) / len(y_prob)) * np.abs(prob_mean - acc_mean)
     return ece
 
-def calculate_sci_metrics_with_ci(y_true, y_prob, n_bootstraps=1000):
+def calculate_sci_metrics_with_ci(
+    y_true, y_prob, n_bootstraps=1000, bootstrap_seed=DEFAULT_SEED
+):
     y_true, y_prob = np.array(y_true), np.array(y_prob)
     auroc = roc_auc_score(y_true, y_prob)
     auprc = average_precision_score(y_true, y_prob)
@@ -84,10 +92,10 @@ def calculate_sci_metrics_with_ci(y_true, y_prob, n_bootstraps=1000):
     pauc = calculate_partial_auc(y_true, y_prob)
     audc = calculate_net_benefit(y_true, y_prob)
     
-    rng = np.random.RandomState(42)
+    rng = np.random.default_rng(bootstrap_seed)
     bootstrapped_auroc = []
     for _ in range(n_bootstraps):
-        indices = rng.randint(0, len(y_prob), len(y_prob))
+        indices = rng.integers(0, len(y_prob), len(y_prob))
         if len(np.unique(y_true[indices])) < 2: continue
         bootstrapped_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
         
@@ -123,7 +131,15 @@ def apply_temporal_mask(mask, dt, lead_time_hours):
 # 🌟 模型预警评估管线
 # =============================================================================
 @torch.no_grad()
-def evaluate_lead_time_single_fold(model, dataloader, device, lead_time_hours):
+def evaluate_lead_time_single_fold(
+    model,
+    dataloader,
+    device,
+    lead_time_hours,
+    artifact_metadata,
+    probability_mode,
+    bootstrap_seed=DEFAULT_SEED,
+):
     model.eval()
     all_preds, all_labels = [], []
     
@@ -161,17 +177,28 @@ def evaluate_lead_time_single_fold(model, dataloader, device, lead_time_hours):
         elif isinstance(outputs, dict) and "logits" in outputs: logits = outputs["logits"]
         else: logits = outputs
             
-        probs = torch.softmax(logits, dim=1)[:, 1]
-        all_preds.extend(probs.cpu().numpy())
+        probs = artifact_probabilities(
+            logits.detach().cpu(), artifact_metadata, probability_mode
+        )
+        all_preds.extend(probs)
         all_labels.extend(labels.cpu().numpy())
         
-    return calculate_sci_metrics_with_ci(all_labels, all_preds, n_bootstraps=500)
+    return calculate_sci_metrics_with_ci(
+        all_labels,
+        all_preds,
+        n_bootstraps=500,
+        bootstrap_seed=bootstrap_seed,
+    )
 
-def main(settings=None):
+def main(settings=None, run_id=None, probability_mode="calibrated"):
     settings = settings or load_settings()
-    data_dir = str(settings.paths.data_cache)
+    if not run_id:
+        raise ValueError("run_id is required to resolve versioned model artifacts")
+    if probability_mode not in ("raw", "calibrated"):
+        raise ValueError("probability_mode must be 'raw' or 'calibrated'")
+    seed_everything(settings.reproducibility)
+    data_dir = str(settings.model_data_dir)
     vocab_dir = str(settings.paths.vocab)
-    save_dir = str(settings.paths.checkpoints)
     report_dir = str(settings.paths.reports)
     os.makedirs(report_dir, exist_ok=True)
     
@@ -181,13 +208,7 @@ def main(settings=None):
     vocab_config = load_vocab_sizes(vocab_dir)
     full_dataset = DILIPlusDataset(data_dir, vocab_dir)
     
-    groups = np.array([str(full_dataset.data.iloc[i]['encounter_id']).split('_')[0] for i in range(len(full_dataset))])
-    gkf = GroupKFold(n_splits=5)
-    
-    # 生成各折的测试集 DataLoader
-    test_loaders = []
-    for _, test_idx in gkf.split(full_dataset, groups=groups):
-        test_loaders.append(DataLoader(Subset(full_dataset, test_idx), batch_size=settings.training.batch_size, shuffle=False))
+    current_fingerprint = dataset_fingerprint(settings)["payload_sha256"]
 
     models_to_evaluate = {
         "MultiModalTextCNN": MultiModalTextCNN,
@@ -206,16 +227,44 @@ def main(settings=None):
             fold_metrics = []
             
             # 执行 5 折全局评估
-            for fold in range(5):
-                weight_path = os.path.join(save_dir, f"best_calib_{model_name}_Fold{fold+1}.pth")
-                if not os.path.exists(weight_path):
-                    print(f"   ⚠️ Fold {fold+1} weight not found, skipping...")
+            for fold in range(1, settings.evaluation_protocol.outer_folds + 1):
+                artifact_path = deep_artifact_path(settings, run_id, model_name, fold)
+                if not artifact_path.exists():
+                    print(f"   Fold {fold} artifact not found, skipping...")
                     continue
                 
                 model = model_class(**vocab_config).to(device)
-                model.load_state_dict(torch.load(weight_path, map_location=device))
+                metadata = load_deep_artifact(
+                    artifact_path,
+                    model,
+                    map_location=device,
+                    expected_run_id=run_id,
+                    expected_model_name=model_name,
+                    expected_fold=fold,
+                    expected_dataset_fingerprint=current_fingerprint,
+                )
+                test_idx = metadata["split"]["indices"]["test"]
+                test_loader = DataLoader(
+                    Subset(full_dataset, test_idx),
+                    batch_size=settings.training.batch_size,
+                    shuffle=False,
+                    num_workers=settings.reproducibility.dataloader_num_workers,
+                )
                 
-                metrics = evaluate_lead_time_single_fold(model, test_loaders[fold], device, lead_time)
+                metrics = evaluate_lead_time_single_fold(
+                    model,
+                    test_loader,
+                    device,
+                    lead_time,
+                    metadata,
+                    probability_mode,
+                    bootstrap_seed=derive_seed(
+                        settings.reproducibility.bootstrap_seed,
+                        model_name,
+                        fold,
+                        lead_time,
+                    ),
+                )
                 fold_metrics.append(metrics)
             
             if len(fold_metrics) == 0:
@@ -225,6 +274,8 @@ def main(settings=None):
             avg_metrics = {k: np.mean([m[k] for m in fold_metrics]) for k in fold_metrics[0].keys()}
             avg_metrics['Model_Architecture'] = model_name
             avg_metrics['Lead_Time_Hours'] = lead_time
+            avg_metrics['Run_ID'] = run_id
+            avg_metrics['Probability_Mode'] = probability_mode
             all_results.append(avg_metrics)
             
             print(f"   🕒 {lead_time:>2}h Ahead | Avg AUROC: {avg_metrics['AUROC']:.4f} | Avg AUPRC: {avg_metrics['AUPRC']:.4f}")
@@ -233,11 +284,17 @@ def main(settings=None):
     df_results = pd.DataFrame(all_results)
     
     # 调整列序美观
-    cols = ['Model_Architecture', 'Lead_Time_Hours', 'AUROC', 'AUROC_95CI_Lower', 'AUROC_95CI_Upper', 
+    cols = ['Run_ID', 'Probability_Mode', 'Model_Architecture', 'Lead_Time_Hours', 'AUROC', 'AUROC_95CI_Lower', 'AUROC_95CI_Upper',
             'AUPRC', 'Quantile_ECE', 'pAUC_0.2', 'NetBenefit_AUDC', 'Brier']
     df_results = df_results[[c for c in cols if c in df_results.columns]]
     
-    out_path = os.path.join(report_dir, "06a_Early_Warning_Decay_Results.csv")
+    out_path = os.path.join(
+        report_dir,
+        "runs",
+        run_id,
+        f"06a_Early_Warning_Decay_Results_{probability_mode}.csv",
+    )
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     df_results.to_csv(out_path, index=False)
     print(f"\n✅ All Decay Simulations Completed! Data saved to: {out_path}")
 

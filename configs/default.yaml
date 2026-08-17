@@ -6,6 +6,7 @@ database:
 
 paths:
   data_cache: data_cache
+  manifests: manifests
   vocab: vocab
   checkpoints: checkpoints
   reports: reports
@@ -20,3 +21,26 @@ training:
   batch_size: 256
   learning_rate: 0.0001
 
+prediction:
+  # Primary prospective task: all dynamic events must occur strictly before
+  # t_prediction = index_time - gap_hours.
+  gap_hours: 24
+  pseudo_index_seed: 20260816
+  audit_horizons_hours: [0, 12, 24, 48, 72]
+
+reproducibility:
+  # Explicit component seeds prevent a plotting change from silently changing
+  # data splits or metric bootstrap samples.
+  global_seed: 20260816
+  split_seed: 20260816
+  bootstrap_seed: 20260816
+  figure_seed: 20260816
+  deterministic_torch: true
+  dataloader_num_workers: 0
+  pseudo_index_sensitivity_seeds: [20260816, 20260817, 20260818, 20260819, 20260820]
+
+evaluation_protocol:
+  outer_folds: 5
+  selection_fraction: 0.15
+  calibration_fraction: 0.15
+  split_search_attempts: 128

@@ -18,7 +18,7 @@ from diliplus.config import load_settings
 def build_vocabulary(settings=None):
     # 所有相对路径均由配置对象锚定到项目根目录
     settings = settings or load_settings()
-    data_dir = settings.paths.data_cache
+    data_dir = settings.model_data_dir
     vocab_dir = settings.paths.vocab
     os.makedirs(vocab_dir, exist_ok=True)
     
@@ -48,7 +48,9 @@ def build_vocabulary(settings=None):
                 
         med_vocab = base_vocab.copy()
         # 按出现频率排序分配 ID
-        for idx, (word, count) in enumerate(event_counter.most_common()):
+        for word, count in sorted(
+            event_counter.items(), key=lambda item: (-item[1], str(item[0]))
+        ):
             med_vocab[word] = len(med_vocab)
             
         with open(vocab_dir / "vocab_polypharmacy.json", "w", encoding="utf-8") as f:
@@ -70,7 +72,9 @@ def build_vocabulary(settings=None):
                 diag_counter.update(codes)
                 
         diag_vocab = base_vocab.copy()
-        for idx, (word, count) in enumerate(diag_counter.most_common()):
+        for word, count in sorted(
+            diag_counter.items(), key=lambda item: (-item[1], str(item[0]))
+        ):
             diag_vocab[word] = len(diag_vocab)
             
         with open(vocab_dir / "vocab_diagnosis.json", "w", encoding="utf-8") as f:

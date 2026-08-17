@@ -1,0 +1,136 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "DILI-PLUS: P0-03 diagnosis build + audit",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "p0_03_diagnosis_vscode",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\pipelines\\01_build_dataset.py",
+        "--stages",
+        "diagnoses",
+        "diagnosis_audit",
+        "vocabulary"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: Code-00/04 deterministic rebuild",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code00_code04_rebuild_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\verify_deterministic_rebuild.py"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: Code-04 pseudo-index sensitivity",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code04_pseudo_sensitivity_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\audit_pseudo_index_sensitivity.py"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: Code-05 real-data split audit",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code05_split_audit_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\audit_code05_splits.py"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: Code-06 artifact smoke",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code06_artifact_smoke_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\smoke_code06_artifact.py"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "DILI-PLUS: recorded unit tests",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "unit_tests_vscode",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    }
+  ]
+}

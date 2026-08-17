@@ -42,9 +42,9 @@ EXTENDED_PALETTE = [
 # 扩展版高辨识度几何标记 (排除易混淆形状)
 EXTENDED_MARKERS = ['o', 's', '^', 'D', 'v', 'p', '*', 'h', 'X', '<']
 
-# Panel B 的恒定基准色
-COLOR_BASELINE = '#999ACD'      
-COLOR_PROTECTIVE = '#99CDCE'    
+# Panel B 的输入状态配色
+COLOR_ORIGINAL = '#999ACD'
+COLOR_SUBSTITUTED = '#99CDCE'
 
 def generate_simulation_figure(settings=None):
     settings = settings or load_settings()
@@ -56,9 +56,9 @@ def generate_simulation_figure(settings=None):
         print(f"🚨 Data not found: {data_path}")
         return
         
-    print("⏳ Loading Scalable In-Silico Simulation Data...")
+    print("⏳ Loading medication-token perturbation data...")
     df = pd.read_csv(data_path)
-    patient_id = df['Patient_ID'].iloc[0]
+    row_index = df['Patient_ID'].iloc[0]
     
     # -----------------------------------------------------------------
     # 🎨 准备 1x2 高级排版画布
@@ -68,7 +68,7 @@ def generate_simulation_figure(settings=None):
     ax_subst = axes[1]
     
     # ==========================================
-    # Panel A: Dose Tapering (动态剂量衰减轨迹)
+    # Panel A: medication-embedding attenuation
     # ==========================================
     df_taper = df[df['Intervention_Type'] == 'Dose Tapering'].copy()
     
@@ -85,7 +85,10 @@ def generate_simulation_figure(settings=None):
         if len(med_df) == 0: continue
             
         risk_vals = med_df['Predicted_DILI_Risk'].values
-        clean_label = med.replace('[*]', '').replace('[Max Variance]', '').strip()
+        clean_label = med
+        for tag in ('[*]', '[Max Variance]', '[Clinical Target]', '[Clinical Swap]'):
+            clean_label = clean_label.replace(tag, '')
+        clean_label = clean_label.strip()
         
         # 动态分配唯一标识对
         current_color = next(color_cycle)
@@ -95,12 +98,15 @@ def generate_simulation_figure(settings=None):
                       lw=3.0, markersize=8, alpha=0.9, label=clean_label, markeredgecolor='white', zorder=4)
 
     ax_taper.set_xlim([1.05, -0.05]) 
-    ax_taper.set_title(f'A. Simulated Dose Tapering Trajectories (Patient {patient_id})', loc='left', fontweight='bold', fontsize=18, pad=15)
-    ax_taper.set_xlabel(r'Drug Embedding Dilution Coefficient ($\alpha$)', fontweight='bold', fontsize=14)
-    ax_taper.set_ylabel('Predicted DILI Risk Probability (%)', fontweight='bold', fontsize=14)
+    ax_taper.set_title(
+        f'A. Medication-Embedding Attenuation (Row {row_index})',
+        loc='left', fontweight='bold', fontsize=17, pad=15
+    )
+    ax_taper.set_xlabel(r'Embedding amplitude multiplier ($\alpha$)', fontweight='bold', fontsize=14)
+    ax_taper.set_ylabel('Model-predicted AHI-proxy probability (%)', fontweight='bold', fontsize=14)
     
     ax_taper.set_xticks([1.0, 0.75, 0.5, 0.25, 0.0])
-    ax_taper.set_xticklabels(['1.0\n(Actual)', '0.75', '0.50', '0.25', '0.0\n(Removed)'], fontweight='bold')
+    ax_taper.set_xticklabels(['1.0\n(Original)', '0.75', '0.50', '0.25', '0.0\n(Zero vector)'], fontweight='bold')
     
     ax_taper.grid(True, linestyle='--', alpha=0.6, zorder=0)
     sns.despine(ax=ax_taper)
@@ -108,10 +114,10 @@ def generate_simulation_figure(settings=None):
     # 将图例放在左上角并使用无边框样式
     handles, labels = ax_taper.get_legend_handles_labels()
     ax_taper.legend(handles, labels, loc='upper left', 
-                    frameon=False, fontsize=11, title='Simulated Medications', title_fontproperties={'weight':'bold'})
+                    frameon=False, fontsize=11, title='Perturbed medication token', title_fontproperties={'weight':'bold'})
 
     # ==========================================
-    # Panel B: In-Silico Drug Substitution (换药模拟)
+    # Panel B: predefined medication-token substitution
     # ==========================================
     df_subst = df[df['Intervention_Type'] == 'Substitution']
     
@@ -121,11 +127,11 @@ def generate_simulation_figure(settings=None):
         
         subst_row = df_subst.iloc[0]
         subst_risk = subst_row['Predicted_DILI_Risk']
-        arr = subst_row['Absolute_Risk_Reduction']
+        delta_model_pp = subst_risk - baseline_risk
         
-        scenarios = ['Baseline Regimen\n(Atorvastatin)', 'Simulated Regimen\n(Pravastatin)']
+        scenarios = ['Original input token\n(Atorvastatin)', 'Substituted input token\n(Pravastatin)']
         risks = [baseline_risk, subst_risk]
-        bar_colors = [COLOR_BASELINE, COLOR_PROTECTIVE]
+        bar_colors = [COLOR_ORIGINAL, COLOR_SUBSTITUTED]
         
         bars = ax_subst.bar(scenarios, risks, color=bar_colors, edgecolor='black', width=0.5, linewidth=2, zorder=3)
         
@@ -133,14 +139,18 @@ def generate_simulation_figure(settings=None):
             ax_subst.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5, 
                           f"{risk:.1f}%", ha='center', va='bottom', fontweight='bold', fontsize=14)
                           
-        ax_subst.annotate(f"ARR = -{arr:.1f}%", 
-                          xy=(1, subst_risk), xytext=(0, subst_risk),
-                          arrowprops=dict(facecolor='black', arrowstyle='->', lw=2),
-                          ha='center', va='center', fontweight='bold', fontsize=12, color='darkred')
+        ax_subst.annotate(
+            rf"$\Delta p_{{model}}$ = {delta_model_pp:+.1f} pp",
+            # 修正：xytext保持0.5不动，仅修改箭头目标坐标xy为0.75（即1.0向左平移半个柱宽0.25）
+            xy=(0.75, subst_risk), xytext=(0.5, max(risks) * 1.16),
+            arrowprops=dict(facecolor='black', arrowstyle='->', lw=1.8),
+            ha='center', va='center', fontweight='bold', fontsize=12, color='#7A1F1F'
+        )
                           
-        ax_subst.set_ylim([0, max(risks) * 1.3])
-        ax_subst.set_title('B. Alternative Regimen Simulation', loc='left', fontweight='bold', fontsize=18, pad=15)
-        ax_subst.set_ylabel('Predicted Risk (%)', fontweight='bold', fontsize=14)
+        ax_subst.set_ylim([0, max(risks) * 1.32])
+        ax_subst.set_title('B. Predefined Token-Substitution Sensitivity', loc='left', fontweight='bold', fontsize=17, pad=15)
+        ax_subst.set_xlabel('Medication-token input', fontweight='bold', fontsize=14)
+        ax_subst.set_ylabel('Model-predicted AHI-proxy probability (%)', fontweight='bold', fontsize=14)
         ax_subst.grid(axis='y', linestyle='--', alpha=0.6, zorder=0)
         sns.despine(ax=ax_subst)
     
@@ -155,7 +165,7 @@ def generate_simulation_figure(settings=None):
     plt.savefig(out_path_pdf, format='pdf', bbox_inches='tight')
     plt.close()
     
-    print(f"\n🎉 绝美！可扩展的 Figure 6 (临床模拟沙盒) 渲染完毕！(400 DPI)")
+    print(f"\n✅ Figure 6 medication-token sensitivity plot rendered (400 DPI).")
     print(f"👉 查阅路径: {out_path_png}")
 
 if __name__ == "__main__":

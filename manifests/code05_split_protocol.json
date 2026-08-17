@@ -1,0 +1,309 @@
+{
+  "schema_version": 1,
+  "generated_utc": "2026-08-17T01:17:44.854078+00:00",
+  "scope": "Code-05 four-way grouped evaluation protocol",
+  "privacy": "aggregate counts and membership hashes only; no row identifiers",
+  "status": "PASS",
+  "protocol": {
+    "outer": "StratifiedGroupKFold",
+    "outer_folds": 5,
+    "inner": "deterministic best-of-N GroupShuffleSplit candidates",
+    "selection_fraction_of_outer_train": 0.15,
+    "calibration_fraction_of_outer_train": 0.15,
+    "split_search_attempts": 128,
+    "group_definition": "encounter_id prefix before first underscore",
+    "roles": {
+      "training": "model parameter fitting only",
+      "selection": "epoch/hyperparameter selection only",
+      "calibration": "temperature fitting only",
+      "test": "one final raw-logit inference pass only"
+    }
+  },
+  "cohort": {
+    "encounters": 46864,
+    "positive": 391,
+    "negative": 46473,
+    "membership_sha256": "186C2E37BAFD2B81567469717343C43C767ECD41503105F2BE02A7D96641F7CC"
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "status": "PASS",
+      "roles": {
+        "training": {
+          "encounters": 26236,
+          "positive": 218,
+          "negative": 26018,
+          "groups": 26231,
+          "prevalence_pct": 0.830919,
+          "membership_sha256": "84D53302415A6A21849E11C29F3CE21BEAA10BCCE10FF9ED76D23D2A743B73F2"
+        },
+        "selection": {
+          "encounters": 5626,
+          "positive": 47,
+          "negative": 5579,
+          "groups": 5622,
+          "prevalence_pct": 0.835407,
+          "membership_sha256": "2F1D79514996B5EFAEBD9157199F988230313E561978868593F5B7E1B6366746"
+        },
+        "calibration": {
+          "encounters": 5629,
+          "positive": 47,
+          "negative": 5582,
+          "groups": 5622,
+          "prevalence_pct": 0.834962,
+          "membership_sha256": "0BE98966492992C16A65E0C66BD62AD7A753A4689BC231045EA10645A5DBB69C"
+        },
+        "test": {
+          "encounters": 9373,
+          "positive": 79,
+          "negative": 9294,
+          "groups": 9369,
+          "prevalence_pct": 0.842846,
+          "membership_sha256": "73A8B69AE6A8E6B9DEBE1E31462D41C1F310ED409B2D86AA860596F86B0A9571"
+        }
+      },
+      "index_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "group_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "test_consumption_contract": "single final inference pass only"
+    },
+    {
+      "fold": 2,
+      "status": "PASS",
+      "roles": {
+        "training": {
+          "encounters": 26236,
+          "positive": 219,
+          "negative": 26017,
+          "groups": 26231,
+          "prevalence_pct": 0.834731,
+          "membership_sha256": "2DD94E0AA5A32B213ED13A22B4859B529DBA3C2F6393072B8FBFB93FC36F34AF"
+        },
+        "selection": {
+          "encounters": 5628,
+          "positive": 47,
+          "negative": 5581,
+          "groups": 5622,
+          "prevalence_pct": 0.83511,
+          "membership_sha256": "51AE9498DE3C7A79B67AA0826B4A0BFE6098A13ADF5CF963BBC8868CBA5E900A"
+        },
+        "calibration": {
+          "encounters": 5627,
+          "positive": 47,
+          "negative": 5580,
+          "groups": 5622,
+          "prevalence_pct": 0.835259,
+          "membership_sha256": "441EC28C32EFAF49832C990A6872639B0F6A9E9C0CF06426E92860ED3CDCF427"
+        },
+        "test": {
+          "encounters": 9373,
+          "positive": 78,
+          "negative": 9295,
+          "groups": 9369,
+          "prevalence_pct": 0.832178,
+          "membership_sha256": "6E35E19E14EB97AD307EEA124B65B2C3D3A8B11A7E65A5A4662043296F792A06"
+        }
+      },
+      "index_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "group_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "test_consumption_contract": "single final inference pass only"
+    },
+    {
+      "fold": 3,
+      "status": "PASS",
+      "roles": {
+        "training": {
+          "encounters": 26240,
+          "positive": 219,
+          "negative": 26021,
+          "groups": 26231,
+          "prevalence_pct": 0.834604,
+          "membership_sha256": "83EF5F6FC140DB4D6E8EB0E36FD9169D5E71F3701140965B65CB21505793A602"
+        },
+        "selection": {
+          "encounters": 5625,
+          "positive": 47,
+          "negative": 5578,
+          "groups": 5622,
+          "prevalence_pct": 0.835556,
+          "membership_sha256": "0726CE0EB3559F65E8D444F636A24F82037AB131F864899AC99BC56B0044030D"
+        },
+        "calibration": {
+          "encounters": 5626,
+          "positive": 47,
+          "negative": 5579,
+          "groups": 5622,
+          "prevalence_pct": 0.835407,
+          "membership_sha256": "0E40D412E2DA626BD5608BF3DA504539984537D232A9732375B4896CFD14CA5F"
+        },
+        "test": {
+          "encounters": 9373,
+          "positive": 78,
+          "negative": 9295,
+          "groups": 9369,
+          "prevalence_pct": 0.832178,
+          "membership_sha256": "8CA9F629C29F4FD89FC59ACC94D70AF4827883B700E8ABD916333F8ED7EF326B"
+        }
+      },
+      "index_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "group_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "test_consumption_contract": "single final inference pass only"
+    },
+    {
+      "fold": 4,
+      "status": "PASS",
+      "roles": {
+        "training": {
+          "encounters": 26235,
+          "positive": 219,
+          "negative": 26016,
+          "groups": 26231,
+          "prevalence_pct": 0.834763,
+          "membership_sha256": "40BD9FDB2696624CB02E1C1AB9954BD900658A2F200B028247FF32A685C0D77E"
+        },
+        "selection": {
+          "encounters": 5627,
+          "positive": 47,
+          "negative": 5580,
+          "groups": 5622,
+          "prevalence_pct": 0.835259,
+          "membership_sha256": "5621B30E8F62EF7F1CF39C25A25AA062AD4C842E84A5F83ADAD91144ED1269C2"
+        },
+        "calibration": {
+          "encounters": 5629,
+          "positive": 47,
+          "negative": 5582,
+          "groups": 5622,
+          "prevalence_pct": 0.834962,
+          "membership_sha256": "4C6C39894879748C95058BC17FCF76A53E2FD6F61DFFA05BFBCC166B03CAC060"
+        },
+        "test": {
+          "encounters": 9373,
+          "positive": 78,
+          "negative": 9295,
+          "groups": 9369,
+          "prevalence_pct": 0.832178,
+          "membership_sha256": "4D5C11AAC62BBF42B369CF7FEEE62C18F064C52A94977EFB7155D4B8EF811FC7"
+        }
+      },
+      "index_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "group_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "test_consumption_contract": "single final inference pass only"
+    },
+    {
+      "fold": 5,
+      "status": "PASS",
+      "roles": {
+        "training": {
+          "encounters": 26238,
+          "positive": 219,
+          "negative": 26019,
+          "groups": 26232,
+          "prevalence_pct": 0.834667,
+          "membership_sha256": "8ED59C8C5E84869D583D5CECE82E368D165D0E615945D06F68455A8756E424B7"
+        },
+        "selection": {
+          "encounters": 5625,
+          "positive": 47,
+          "negative": 5578,
+          "groups": 5622,
+          "prevalence_pct": 0.835556,
+          "membership_sha256": "4F72706E13B034B2CE08189C6A1136E265A33A890574DA121A459875B3CE410D"
+        },
+        "calibration": {
+          "encounters": 5629,
+          "positive": 47,
+          "negative": 5582,
+          "groups": 5622,
+          "prevalence_pct": 0.834962,
+          "membership_sha256": "CE2CFA1201782EB1FAF0BD1C3F04BEB715D37900572FDA264D35E189B1C619C0"
+        },
+        "test": {
+          "encounters": 9372,
+          "positive": 78,
+          "negative": 9294,
+          "groups": 9368,
+          "prevalence_pct": 0.832266,
+          "membership_sha256": "C6189A26B1F35067B16E386A3796EBD54B08700229937DE1AFEC5DEA2A67811D"
+        }
+      },
+      "index_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "group_overlap": {
+        "training__selection": 0,
+        "training__calibration": 0,
+        "training__test": 0,
+        "selection__calibration": 0,
+        "selection__test": 0,
+        "calibration__test": 0
+      },
+      "test_consumption_contract": "single final inference pass only"
+    }
+  ],
+  "all_outer_test_memberships_sha256": "CDC94EA39B3B3F37773569DEF321C37BF81F9479B61CD7F7C797C8F9F462FA35",
+  "configuration_sha256": "0E43E374C5DBFD5EC5D31708D0B8EEF354F46F5FF475A5C404C24CBE35E014C1",
+  "split_implementation_sha256": "27C257F41F6C27DC078A4B920812DEA4756A1F55C22D29760494CFD2BDA0FA6E",
+  "manifest_payload_sha256": "24EE4A1E123F576699B07B5D58FD27DCBAF710C392905B139DE944CFBD12E50D"
+}

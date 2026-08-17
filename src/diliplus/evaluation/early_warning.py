@@ -10,15 +10,13 @@ physically zeroed together with their masks.
 from __future__ import annotations
 
 import json
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import (
-    average_precision_score,
-    brier_score_loss,
-    roc_auc_score,
-)
 from torch.utils.data import DataLoader, Subset
 
 from diliplus.artifacts import (
@@ -30,12 +28,20 @@ from diliplus.artifacts import (
 )
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
+from diliplus.evaluation.metrics import (
+    add_holm_adjustment,
+    calibration_bins,
+    cluster_bootstrap_intervals,
+    compute_binary_metrics,
+    decision_curve,
+    paired_cluster_bootstrap,
+)
 from diliplus.models.registry import (
     FORMAL_DEEP_MODEL_NAMES,
     build_formal_deep_model,
     extract_ahi_proxy_logits,
 )
-from diliplus.reproducibility import DEFAULT_SEED, derive_seed, seed_everything
+from diliplus.reproducibility import derive_seed, seed_everything
 
 
 MODEL_INPUT_KEYS = (
@@ -127,30 +133,39 @@ def apply_effective_horizon_cutoff(
     return output, audit
 
 
-def _metric_summary(y_true, y_prob, *, bootstrap_seed=DEFAULT_SEED, n_bootstraps=1000):
-    y_true = np.asarray(y_true, dtype=np.int64)
-    y_prob = np.asarray(y_prob, dtype=np.float64)
-    if len(y_true) == 0 or set(np.unique(y_true)) != {0, 1}:
-        raise ValueError("Early-warning metrics require nonempty binary outcomes")
-    auroc = roc_auc_score(y_true, y_prob)
-    auprc = average_precision_score(y_true, y_prob)
-    rng = np.random.default_rng(bootstrap_seed)
-    boot_auroc, boot_auprc = [], []
-    for _ in range(int(n_bootstraps)):
-        indices = rng.integers(0, len(y_true), len(y_true))
-        if len(np.unique(y_true[indices])) < 2:
-            continue
-        boot_auroc.append(roc_auc_score(y_true[indices], y_prob[indices]))
-        boot_auprc.append(average_precision_score(y_true[indices], y_prob[indices]))
-    return {
-        "AUROC": float(auroc),
-        "AUROC_95CI_Lower": float(np.percentile(boot_auroc, 2.5)),
-        "AUROC_95CI_Upper": float(np.percentile(boot_auroc, 97.5)),
-        "AUPRC": float(auprc),
-        "AUPRC_95CI_Lower": float(np.percentile(boot_auprc, 2.5)),
-        "AUPRC_95CI_Upper": float(np.percentile(boot_auprc, 97.5)),
-        "Brier": float(brier_score_loss(y_true, y_prob)),
-    }
+def _dca_thresholds(settings):
+    protocol = settings.evaluation_protocol
+    return np.arange(
+        protocol.dca_min_threshold,
+        protocol.dca_max_threshold + protocol.dca_step / 2.0,
+        protocol.dca_step,
+    )
+
+
+def _git_commit(project_root: Path) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_root,
+            text=True,
+            encoding="utf-8",
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        numeric = float(value)
+        return numeric if np.isfinite(numeric) else None
+    return value
 
 
 def build_horizon_availability(
@@ -375,7 +390,24 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
         settings.prediction.early_warning_horizons_hours,
         settings.prediction.gap_hours,
     )
+    protocol = settings.evaluation_protocol
+    thresholds = _dca_thresholds(settings)
+    result_root = settings.paths.reports / "runs" / run_id / "early_warning"
+    prediction_root = result_root / "predictions"
+    metrics_root = result_root / "metrics"
+    prediction_root.mkdir(parents=True, exist_ok=True)
+    metrics_root.mkdir(parents=True, exist_ok=True)
+    encounter_ids = dataset.data["encounter_id"].astype(str).to_numpy()
+    if "patient_id" not in dataset.data or dataset.data["patient_id"].isna().any():
+        raise KeyError("Early-warning evaluation requires non-null source patient_id")
+    patient_ids = dataset.data["patient_id"].astype(str).to_numpy()
+    labels_array = np.asarray(dataset.labels, dtype=np.int64)
     results = []
+    interval_frames = []
+    calibration_frames = []
+    dca_frames = []
+    prediction_frames = {}
+    prediction_paths = []
     reference_test_indices = None
 
     for model_name in FORMAL_DEEP_MODEL_NAMES:
@@ -394,8 +426,14 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
                 expected_dataset_fingerprint=fingerprint,
             )
             test_indices = list(map(int, metadata["split"]["indices"]["test"]))
-            fold_payloads.append((model, metadata, test_indices))
-        flattened = [index for _, _, indices in fold_payloads for index in indices]
+            training_indices = list(
+                map(int, metadata["split"]["indices"]["training"])
+            )
+            reference_prevalence = float(labels_array[training_indices].mean())
+            fold_payloads.append(
+                (model, metadata, test_indices, reference_prevalence, fold)
+            )
+        flattened = [index for _, _, indices, _, _ in fold_payloads for index in indices]
         if len(flattened) != len(set(flattened)) or set(flattened) != set(range(len(dataset))):
             raise RuntimeError(
                 f"{model_name} outer-test folds must cover each encounter exactly once"
@@ -406,8 +444,8 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
             raise RuntimeError("Formal models do not share identical outer-test splits")
 
         for horizon in horizons:
-            pooled_labels, pooled_predictions = [], []
-            for model, metadata, test_indices in fold_payloads:
+            fold_frames = []
+            for model, metadata, test_indices, reference_prevalence, fold in fold_payloads:
                 loader = DataLoader(
                     Subset(dataset, test_indices),
                     batch_size=settings.training.batch_size,
@@ -423,17 +461,44 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
                     artifact_metadata=metadata,
                     probability_mode=probability_mode,
                 )
-                pooled_labels.extend(labels)
-                pooled_predictions.extend(predictions)
-            metrics = _metric_summary(
-                pooled_labels,
-                pooled_predictions,
-                bootstrap_seed=derive_seed(
-                    settings.reproducibility.bootstrap_seed,
-                    model_name,
-                    horizon,
-                    probability_mode,
-                ),
+                indices = np.asarray(test_indices, dtype=np.int64)
+                fold_frames.append(
+                    pd.DataFrame(
+                        {
+                            "dataset_index": indices,
+                            "encounter_id": encounter_ids[indices],
+                            "patient_id": patient_ids[indices],
+                            "y_true": np.asarray(labels, dtype=np.int64),
+                            "y_prob": np.asarray(predictions, dtype=np.float64),
+                            "fold": int(fold),
+                            "reference_prevalence": reference_prevalence,
+                        }
+                    )
+                )
+            frame = (
+                pd.concat(fold_frames, ignore_index=True)
+                .sort_values("dataset_index", kind="stable")
+                .reset_index(drop=True)
+            )
+            if frame["dataset_index"].duplicated().any() or len(frame) != len(dataset):
+                raise RuntimeError(
+                    f"{model_name}/{horizon:g} h predictions do not cover the cohort once"
+                )
+            prediction_frames[(model_name, float(horizon))] = frame
+            prediction_dir = prediction_root / model_name
+            prediction_dir.mkdir(parents=True, exist_ok=True)
+            prediction_path = prediction_dir / f"horizon_{int(horizon):03d}h.csv"
+            frame.to_csv(prediction_path, index=False)
+            prediction_paths.append(prediction_path)
+
+            metrics = compute_binary_metrics(
+                frame["y_true"],
+                frame["y_prob"],
+                reference_prevalence=frame["reference_prevalence"],
+                p_auc_fpr_limits=protocol.p_auc_fpr_limits,
+                risk_thresholds=protocol.risk_thresholds,
+                alert_budgets=protocol.alert_budgets,
+                dca_thresholds=thresholds,
             )
             metrics.update(
                 {
@@ -442,16 +507,127 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
                     "Model_Architecture": model_name,
                     "Base_Prediction_Gap_Hours": settings.prediction.gap_hours,
                     "Effective_Horizon_Hours_Before_Index": horizon,
-                    "N": len(pooled_labels),
-                    "Positive_N": int(np.sum(pooled_labels)),
-                    "Prevalence": float(np.mean(pooled_labels)),
                 }
             )
             results.append(metrics)
+
+            intervals = cluster_bootstrap_intervals(
+                frame["y_true"],
+                frame["y_prob"],
+                frame["patient_id"],
+                n_replicates=protocol.bootstrap_replicates,
+                seed=derive_seed(
+                    settings.reproducibility.bootstrap_seed,
+                    run_id,
+                    model_name,
+                    horizon,
+                    probability_mode,
+                    "early_warning_ci",
+                ),
+            )
+            intervals.insert(0, "Effective_Horizon_Hours_Before_Index", horizon)
+            intervals.insert(0, "Model_Architecture", model_name)
+            intervals.insert(0, "Probability_Mode", probability_mode)
+            intervals.insert(0, "Run_ID", run_id)
+            interval_frames.append(intervals)
+
+            bins = calibration_bins(frame["y_true"], frame["y_prob"])
+            bins.insert(0, "Effective_Horizon_Hours_Before_Index", horizon)
+            bins.insert(0, "Model_Architecture", model_name)
+            bins.insert(0, "Probability_Mode", probability_mode)
+            bins.insert(0, "Run_ID", run_id)
+            calibration_frames.append(bins)
+
+            curve = decision_curve(frame["y_true"], frame["y_prob"], thresholds)
+            curve.insert(0, "Effective_Horizon_Hours_Before_Index", horizon)
+            curve.insert(0, "Model_Architecture", model_name)
+            curve.insert(0, "Probability_Mode", probability_mode)
+            curve.insert(0, "Run_ID", run_id)
+            dca_frames.append(curve)
             print(
                 f"[DILI-PLUS][Code-09] {model_name} {horizon:g} h: "
                 f"AUROC={metrics['AUROC']:.4f}, AUPRC={metrics['AUPRC']:.4f}"
             )
+
+    primary_name = "TimeAwareMultimodalTransformer"
+    primary_comparison_frames = []
+    for horizon in horizons:
+        primary = prediction_frames[(primary_name, float(horizon))]
+        horizon_comparisons = []
+        for comparator_name in FORMAL_DEEP_MODEL_NAMES:
+            if comparator_name == primary_name:
+                continue
+            comparator = prediction_frames[(comparator_name, float(horizon))]
+            if not primary[
+                ["dataset_index", "encounter_id", "patient_id", "y_true"]
+            ].equals(
+                comparator[
+                    ["dataset_index", "encounter_id", "patient_id", "y_true"]
+                ]
+            ):
+                raise RuntimeError("Early-warning model memberships differ")
+            comparison = paired_cluster_bootstrap(
+                primary["y_true"],
+                primary["y_prob"],
+                comparator["y_prob"],
+                primary["patient_id"],
+                n_replicates=protocol.bootstrap_replicates,
+                seed=derive_seed(
+                    settings.reproducibility.bootstrap_seed,
+                    run_id,
+                    horizon,
+                    comparator_name,
+                    probability_mode,
+                    "early_warning_model_pair",
+                ),
+            )
+            comparison.insert(0, "Comparator", comparator_name)
+            comparison.insert(0, "Primary", primary_name)
+            comparison.insert(0, "Effective_Horizon_Hours_Before_Index", horizon)
+            comparison.insert(0, "Probability_Mode", probability_mode)
+            comparison.insert(0, "Run_ID", run_id)
+            horizon_comparisons.append(comparison)
+        primary_comparison_frames.append(
+            add_holm_adjustment(pd.concat(horizon_comparisons, ignore_index=True))
+        )
+
+    horizon_degradation_frames = []
+    base_horizon = float(horizons[0])
+    for model_name in FORMAL_DEEP_MODEL_NAMES:
+        reference = prediction_frames[(model_name, base_horizon)]
+        model_comparisons = []
+        for horizon in horizons[1:]:
+            earlier = prediction_frames[(model_name, float(horizon))]
+            comparison = paired_cluster_bootstrap(
+                earlier["y_true"],
+                earlier["y_prob"],
+                reference["y_prob"],
+                earlier["patient_id"],
+                n_replicates=protocol.bootstrap_replicates,
+                seed=derive_seed(
+                    settings.reproducibility.bootstrap_seed,
+                    run_id,
+                    model_name,
+                    horizon,
+                    probability_mode,
+                    "early_warning_horizon_pair",
+                ),
+            ).rename(
+                columns={
+                    "primary_estimate": "earlier_horizon_estimate",
+                    "comparator_estimate": "reference_24h_estimate",
+                    "delta_primary_minus_comparator": "delta_earlier_minus_24h",
+                }
+            )
+            comparison.insert(0, "Reference_Horizon_Hours", base_horizon)
+            comparison.insert(0, "Earlier_Horizon_Hours", horizon)
+            comparison.insert(0, "Model_Architecture", model_name)
+            comparison.insert(0, "Probability_Mode", probability_mode)
+            comparison.insert(0, "Run_ID", run_id)
+            model_comparisons.append(comparison)
+        horizon_degradation_frames.append(
+            add_holm_adjustment(pd.concat(model_comparisons, ignore_index=True))
+        )
 
     report_path = (
         settings.paths.reports
@@ -460,8 +636,75 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
         / f"06a_Early_Warning_Strict_{probability_mode}.csv"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(results).to_csv(report_path, index=False)
+    pooled_metrics = pd.DataFrame(results)
+    bootstrap_intervals = pd.concat(interval_frames, ignore_index=True)
+    primary_comparisons = pd.concat(primary_comparison_frames, ignore_index=True)
+    horizon_degradation = pd.concat(horizon_degradation_frames, ignore_index=True)
+    metric_outputs = {
+        "pooled_metrics.csv": pooled_metrics,
+        "bootstrap_intervals.csv": bootstrap_intervals,
+        "primary_vs_comparators.csv": primary_comparisons,
+        "horizon_degradation.csv": horizon_degradation,
+        "calibration_bins.csv": pd.concat(calibration_frames, ignore_index=True),
+        "dca_curves.csv": pd.concat(dca_frames, ignore_index=True),
+    }
+    for filename, frame in metric_outputs.items():
+        frame.to_csv(metrics_root / filename, index=False)
+    pooled_metrics.to_csv(report_path, index=False)
+
+    project_root = Path(settings.paths.root)
+    tracked_manifest_path = settings.paths.manifests / "code09_early_warning_performance.json"
+    main_manifest_path = settings.paths.manifests / "code10_formal_run.json"
+    availability_manifest_path = settings.paths.manifests / "code09_early_warning_contract.json"
+    payload = {
+        "schema_version": 1,
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "COMPLETE",
+        "contract": "code09_strict_early_warning_performance_v1",
+        "run_id": run_id,
+        "probability_mode": probability_mode,
+        "models": list(FORMAL_DEEP_MODEL_NAMES),
+        "base_prediction_gap_hours": settings.prediction.gap_hours,
+        "effective_horizons_hours": list(horizons),
+        "outer_folds": protocol.outer_folds,
+        "oof_rows_per_model_horizon": len(dataset),
+        "positives": int(labels_array.sum()),
+        "patient_clusters": int(pd.Series(patient_ids).nunique()),
+        "bootstrap_replicates": protocol.bootstrap_replicates,
+        "patient_group_source": "analysis.v_patient_encounters.patient_id",
+        "evaluation_git_commit": _git_commit(project_root),
+        "training_manifest_sha256": file_sha256(main_manifest_path),
+        "availability_manifest_sha256": file_sha256(availability_manifest_path),
+        "dataset_fingerprint": dataset_fingerprint(settings),
+        "metric_files": {
+            filename: {
+                "sha256": file_sha256(metrics_root / filename),
+                "bytes": (metrics_root / filename).stat().st_size,
+            }
+            for filename in metric_outputs
+        },
+        "prediction_file_hashes": {
+            path.relative_to(project_root).as_posix(): file_sha256(path)
+            for path in prediction_paths
+        },
+        "pooled_metrics": pooled_metrics.to_dict(orient="records"),
+        "bootstrap_intervals": bootstrap_intervals.to_dict(orient="records"),
+        "primary_vs_comparators": primary_comparisons.to_dict(orient="records"),
+        "horizon_degradation": horizon_degradation.to_dict(orient="records"),
+        "interpretation_guardrails": [
+            "All horizons reuse the same fold checkpoint and fitted temperature; no horizon-specific retraining or recalibration.",
+            "The 24-hour model artifact cannot reconstruct 0-hour or 12-hour inputs.",
+            "Earlier-horizon performance is internal retrospective prediction evidence, not proof of clinical benefit or causality.",
+        ],
+        "privacy": "tracked manifest contains aggregate statistics and file hashes only",
+    }
+    payload = _json_safe(payload)
+    local_manifest_path = result_root / "run_manifest.json"
+    encoded_payload = json.dumps(payload, ensure_ascii=False, indent=2)
+    local_manifest_path.write_text(encoded_payload, encoding="utf-8")
+    tracked_manifest_path.write_text(encoded_payload, encoding="utf-8")
     print(f"[DILI-PLUS][Code-09] Strict early-warning results: {report_path}")
+    print(f"[DILI-PLUS][Code-09] Aggregate manifest: {tracked_manifest_path}")
     return report_path
 
 

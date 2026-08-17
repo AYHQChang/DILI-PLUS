@@ -110,9 +110,10 @@ def _training_commit(settings, run_id: str) -> str | None:
     return _git("rev-parse", "HEAD")
 
 
-def _fold_metric_paths(metrics_dir: Path, model_names) -> list[Path]:
+def _fold_metric_paths(settings, model_names, source_run_by_model) -> list[Path]:
     paths = []
     for model_name in model_names:
+        metrics_dir = run_report_dir(settings, source_run_by_model[model_name]) / "metrics"
         filename = (
             "ml_baselines.csv"
             if model_name in {"LogisticRegression", "XGBoost"}
@@ -210,16 +211,31 @@ def finalize_formal_run(
     model_names,
     *,
     analysis_kind: str = "six_model_primary",
+    model_source_run_ids: dict[str, str] | None = None,
 ) -> dict:
     model_names = tuple(model_names)
     if PRIMARY_MODEL_NAME not in model_names:
         raise ValueError("Formal finalization requires the primary model")
+    supplied_sources = dict(model_source_run_ids or {})
+    unexpected_sources = sorted(set(supplied_sources) - set(model_names))
+    if unexpected_sources:
+        raise ValueError(
+            f"model_source_run_ids contains models outside this analysis: {unexpected_sources}"
+        )
+    source_run_by_model = {
+        model_name: supplied_sources.get(model_name, run_id)
+        for model_name in model_names
+    }
     report_root = run_report_dir(settings, run_id)
     metrics_dir = report_root / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     protocol = settings.evaluation_protocol
     frames = {
-        model: _load_model_oof(report_root, model, protocol.outer_folds)
+        model: _load_model_oof(
+            run_report_dir(settings, source_run_by_model[model]),
+            model,
+            protocol.outer_folds,
+        )
         for model in model_names
     }
     _common_membership(frames)
@@ -322,7 +338,9 @@ def finalize_formal_run(
     for filename, frame in outputs.items():
         frame.to_csv(metrics_dir / filename, index=False)
 
-    fold_metric_paths = _fold_metric_paths(metrics_dir, model_names)
+    fold_metric_paths = _fold_metric_paths(
+        settings, model_names, source_run_by_model
+    )
     fold_metric_frames = [pd.read_csv(path) for path in fold_metric_paths]
     ranking_invariance = _fold_ranking_invariance(fold_metric_frames)
     resources = _resource_table(fold_metric_frames)
@@ -335,8 +353,13 @@ def finalize_formal_run(
         "run_id": run_id,
         "run_kind": "formal",
         "analysis_kind": analysis_kind,
+        "model_source_runs": source_run_by_model,
         "git_commit": _git("rev-parse", "HEAD"),
         "training_git_commit": _training_commit(settings, run_id),
+        "source_training_git_commits": {
+            source_run: _training_commit(settings, source_run)
+            for source_run in sorted(set(source_run_by_model.values()))
+        },
         "analysis_git_commit": _git("rev-parse", "HEAD"),
         "git_dirty_at_finalization": bool(_git("status", "--porcelain")),
         "models": list(model_names),

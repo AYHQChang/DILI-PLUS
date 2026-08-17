@@ -1119,8 +1119,10 @@ central registry 预注册六项矩阵：
 这里没有 demographic tensor，因此第一项准确称为 static diagnosis-only，而不是虚构的
 demographic baseline。所有消融复用 `DILIPlusDataset` 九输入、同一 grouped split builder、
 单任务 AHI-proxy、unweighted focal 和 `[batch,2]` output。正式主模型只训练一次；运行
-`pipelines/02_train_models.py --run-id <id> --include-ablations` 时，五个 ablation-only 名称与
-四个正式架构比较模型进入同一 run，full primary 不会重复。
+`pipelines/02_train_models.py --run-id <id> --include-ablations` 可用于合同/试跑；Code-10 正式
+最低消融改由 `scripts/run_code10_minimum_ablations.py` 只训练五个 ablation-only 模型，并从
+六模型主 run 复用 full primary。cross-run finalizer 会逐模型记录来源 run/commit，避免重复训练
+主模型，也不会把复用结果伪称为同一训练 run。
 
 真实格式合成 smoke 为 6/6 finite logits；禁用模态表示逐值为零；without-time 对任意 dt 改变
 保持完全相同输出。tracked manifests 为 `code09_early_warning_contract.json` 和

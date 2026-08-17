@@ -137,7 +137,10 @@ Code-09 使用每个事件到 prediction time 的真实时距，同时截断并�
 24/48/72 h，不能从现有 artifact 伪造 0/12 h 输入。最低消融矩阵包含 static diagnosis-only、
 medication-only、laboratory-only、full without time、full without diagnosis 和 full primary；
 只有显式传入 `--include-ablations` 才会在正式 run 中训练五个 ablation-only 模型。Code-09
-tracked manifests 只证明输入和结构合同，不含训练或性能结果。
+合同 manifest 只证明输入和结构，不含性能。正式最低消融使用
+`scripts/run_code10_minimum_ablations.py`：只训练五个 ablation，并从主 run 复用 full-primary；
+cross-run finalizer 逐模型记录来源 run/commit。early-warning 性能入口会保存 24/48/72 h 的
+逐样本 OOF、本协议全部指标、patient-cluster CI、模型间配对比较和相对24 h配对衰减。
 
 ## 目录职责
 

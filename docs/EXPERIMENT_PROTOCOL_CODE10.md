@@ -133,6 +133,12 @@ time、full without diagnosis 和同一 full primary。主模型不重复训练�
 split/seed/optimizer/loss，并做配对 OOF 比较。128/8 head 分析和后续 3-seed 分析均单列为
 sensitivity，不与六模型主表混合。
 
+执行时 `scripts/run_code10_minimum_ablations.py` 只训练五个 ablation-only 模型，并通过明确的
+`model_source_runs` 复用六模型主 run 的 full-primary OOF；aggregate manifest 必须逐模型记录
+来源 run/commit，禁止复制后伪称六项来自同一训练 run。early-warning 为每个模型/horizon 保存
+逐样本 OOF（本地忽略）、完整扩展指标、patient-cluster CI、primary-vs-comparator 配对比较，
+以及 48/72 h 相对 24 h 的配对衰减；Holm family 在 manifest 中按比较目的分开记录。
+
 ## 8. 运行顺序与停止条件
 
 1. 聚合标签审计；

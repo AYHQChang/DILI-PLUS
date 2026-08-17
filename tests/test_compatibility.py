@@ -22,13 +22,29 @@ class CompatibilityTests(unittest.TestCase):
         self.assertIs(shim.load_vocab_sizes, load_vocab_sizes)
 
     def test_model_shims_export_original_core_classes(self):
-        from models.baseline_models import MultiModalBiLSTM
-        from models.diliplus_engine import DILIPlusEngine
-        from diliplus.models.baselines import MultiModalBiLSTM as PackagedBiLSTM
-        from diliplus.models.diliplus_engine import DILIPlusEngine as PackagedEngine
+        from models.baseline_models import (
+            MultiModalBiLSTM,
+            MultimodalTransformerBaseline,
+        )
+        from models.diliplus_engine import (
+            DILIPlusEngine,
+            TimeAwareMultimodalTransformer,
+        )
+        from diliplus.models.baselines import (
+            MultiModalBiLSTM as PackagedBiLSTM,
+            MultimodalTransformerBaseline as PackagedTransformerBaseline,
+        )
+        from diliplus.models.diliplus_engine import (
+            DILIPlusEngine as PackagedEngine,
+            TimeAwareMultimodalTransformer as PackagedTimeAware,
+        )
 
         self.assertIs(MultiModalBiLSTM, PackagedBiLSTM)
         self.assertIs(DILIPlusEngine, PackagedEngine)
+        self.assertIs(TimeAwareMultimodalTransformer, PackagedTimeAware)
+        self.assertIs(
+            MultimodalTransformerBaseline, PackagedTransformerBaseline
+        )
 
     def test_legacy_trainer_forwards_command_line_unchanged(self):
         fake_main = Mock()

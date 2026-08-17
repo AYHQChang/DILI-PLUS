@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "audit_name": "code07_model_loss_semantics",
+  "audit_status": "PASS",
+  "scope": {
+    "data_source": "fixed_synthetic_batch_only",
+    "patient_level_data_read": false,
+    "patient_identifiers_recorded": false,
+    "training_performed": false,
+    "performance_metrics_computed": false,
+    "execution_device": "cpu",
+    "synthetic_batch_size": 2,
+    "synthetic_vocab_sizes": {
+      "vocab_med_size": 32,
+      "vocab_lab_size": 24,
+      "vocab_diag_size": 16
+    }
+  },
+  "training_configuration": {
+    "hidden_size": 128,
+    "num_heads": 4,
+    "dropout": 0.3,
+    "diagnosis_modality_dropout_prob": 0.15,
+    "focal_gamma": 2.0
+  },
+  "model_contract": {
+    "primary_model_name": "TimeAwareMultimodalTransformer",
+    "primary_class_name": "TimeAwareMultimodalTransformer",
+    "formal_model_names": [
+      "MultiModalTextCNN",
+      "MultiModalBiLSTM",
+      "MultimodalTransformerBaseline",
+      "TimeAwareMultimodalTransformer"
+    ],
+    "formal_registry_size": 4,
+    "formal_names_imply_external_pretraining": false,
+    "from_scratch": true,
+    "external_pretrained_weights_loaded": false,
+    "single_task": true,
+    "target_name": "label_ahi_proxy",
+    "output_contract": {
+      "type": "mapping",
+      "logits_shape": [
+        "batch",
+        2
+      ]
+    },
+    "tuple_or_multi_task_output_rejected": true,
+    "diagnosis_modality_dropout_prob": 0.15,
+    "diagnosis_dropout_applies_during": "training_only",
+    "diagnosis_dropout_granularity": "per_sample",
+    "diagnosis_dropout_affected_stream": "diagnosis_only",
+    "diagnosis_dropout_dynamic_streams_unscaled": true
+  },
+  "loss_contract": {
+    "name": "UnweightedFocalLoss",
+    "task": "single_task_ahi_proxy_binary_classification",
+    "formula": "(1 - p_t)^gamma * cross_entropy",
+    "gamma": 2.0,
+    "reduction": "mean",
+    "class_weighting": "none",
+    "constructor_weight_parameters": [],
+    "learned_parameters": 0,
+    "registered_buffers": 0,
+    "synthetic_loss_scalar_finite": true
+  },
+  "static_semantic_checks": {
+    "active_mtl_or_aki_identifier_hits": [],
+    "model_checkpoint_or_pretraining_call_hits": [],
+    "comments_and_docstrings_excluded_from_identifier_scan": true
+  },
+  "formal_model_smoke_results": [
+    {
+      "formal_name": "MultiModalTextCNN",
+      "class_name": "MultiModalTextCNN",
+      "module": "diliplus.models.baselines",
+      "initialization": "local_random_initialization_from_scratch",
+      "device": "cpu",
+      "parameter_count_with_synthetic_vocab": 164864,
+      "trainable_parameter_count_with_synthetic_vocab": 164864,
+      "forward_input_count": 9,
+      "output_mapping": true,
+      "output_keys": [
+        "logits"
+      ],
+      "logits_shape": [
+        2,
+        2
+      ],
+      "logits_finite": true
+    },
+    {
+      "formal_name": "MultiModalBiLSTM",
+      "class_name": "MultiModalBiLSTM",
+      "module": "diliplus.models.baselines",
+      "initialization": "local_random_initialization_from_scratch",
+      "device": "cpu",
+      "parameter_count_with_synthetic_vocab": 373506,
+      "trainable_parameter_count_with_synthetic_vocab": 373506,
+      "forward_input_count": 9,
+      "output_mapping": true,
+      "output_keys": [
+        "logits"
+      ],
+      "logits_shape": [
+        2,
+        2
+      ],
+      "logits_finite": true
+    },
+    {
+      "formal_name": "MultimodalTransformerBaseline",
+      "class_name": "MultimodalTransformerBaseline",
+      "module": "diliplus.models.baselines",
+      "initialization": "local_random_initialization_from_scratch",
+      "device": "cpu",
+      "parameter_count_with_synthetic_vocab": 1854594,
+      "trainable_parameter_count_with_synthetic_vocab": 1854594,
+      "forward_input_count": 9,
+      "output_mapping": true,
+      "output_keys": [
+        "logits"
+      ],
+      "logits_shape": [
+        2,
+        2
+      ],
+      "logits_finite": true
+    },
+    {
+      "formal_name": "TimeAwareMultimodalTransformer",
+      "class_name": "TimeAwareMultimodalTransformer",
+      "module": "diliplus.models.diliplus_engine",
+      "initialization": "local_random_initialization_from_scratch",
+      "device": "cpu",
+      "parameter_count_with_synthetic_vocab": 2531458,
+      "trainable_parameter_count_with_synthetic_vocab": 2531458,
+      "forward_input_count": 9,
+      "output_mapping": true,
+      "output_keys": [
+        "h_diag",
+        "h_lab",
+        "h_med",
+        "logits"
+      ],
+      "logits_shape": [
+        2,
+        2
+      ],
+      "logits_finite": true
+    }
+  ],
+  "source_sha256": {
+    "configs/default.yaml": "C3EDD43A9FC59F32648E40793B8371642724B13492A9D2CC8E19BD8FC1A2327C",
+    "src/diliplus/config.py": "51FB94D7A4787251791BCC6A7733C4C06755F13C7B6E6A74F94CD8445A928DA6",
+    "src/diliplus/data/dataset.py": "3226F84C474128E0F31FDD1D8441304AA4C98D1EBCFB31745514A28FA6919456",
+    "src/diliplus/artifacts.py": "BB6B7F1009E91CFB949F3E71FE61D09434C21C8DCB8C219F9B185F13EF834521",
+    "src/diliplus/models/diliplus_engine.py": "E241B802FD98033D45A48E36A0261D1D42BA632B5593E6423B04BC546EF11AFE",
+    "src/diliplus/models/baselines.py": "1FD3BD0F7CC7946A27D3B0F16708031FDB3C5A785FD25A80F5CFCB568CBF3472",
+    "src/diliplus/models/registry.py": "66818768C6096FE90E2531D1610C6C67E5D8F520D31636CD680B6DC4E5C07243",
+    "src/diliplus/training/losses.py": "F70EC2CA4C56E53724AE9EA390EFD55801F69D9457D3A9C7F272A14A4FF643E7",
+    "src/diliplus/training/deep_trainer_calibrated.py": "FA8DAB530B6D557CA92BB25FF3A52AA9F87CD193882FDD90749E64990F7C6207",
+    "src/diliplus/training/ml_baselines_calibrated.py": "D8E73C81AAB81208C47B02FB5E63446121754565D78BBB5671C0050430978B5E",
+    "src/diliplus/evaluation/early_warning.py": "A7F87D178C14419B3EA77B65CA71B1187BE7CACBB9D05DCB32F0D778AFD4C242",
+    "src/diliplus/explainability/attribution.py": "5F2B0E18197518B9FDE21C50F04B91EEDBDFA60B0E8E961CD1DD3F9C57369BE6",
+    "src/diliplus/explainability/perturbation.py": "C490EF401900217260C2DFFB6E69E4751DC9B37E015E953CDEBC0C7135274470",
+    "scripts/audit_code07_model_semantics.py": "DCD2EBC039654F8D9EFB3A1DAC4142D06DD373C8A4B388A231EAE2D62A5B0BFE"
+  },
+  "generated_at_utc": "2026-08-17T02:19:36Z",
+  "stable_payload_sha256": "67E07E35176C1352E50544D50C968A04EA1E0D39D6849641F701D3D6579BF944"
+}

@@ -35,8 +35,8 @@ plt.rcParams.update({
 })
 
 COLOR_PALETTE = {
-    'MultiModalTimeAwareMedBERT': '#DF9E9B',  # TA-MedBERT: 浅粉红
-    'MultiModalBaselineMedBERT': '#99BADF',   # Baseline: 淡蓝
+    'TimeAwareMultimodalTransformer': '#DF9E9B',
+    'MultimodalTransformerBaseline': '#99BADF',
     'MultiModalBiLSTM': '#99CDCE',            # BiLSTM: 淡青
     'MultiModalTextCNN': '#F8BF92',           # CNN: 浅橙
     'XGBoost': '#999ACD',                     # XGBoost: 淡紫
@@ -44,8 +44,8 @@ COLOR_PALETTE = {
 }
 
 LABEL_MAP = {
-    'MultiModalTimeAwareMedBERT': 'TA-MedBERT',
-    'MultiModalBaselineMedBERT': 'Baseline MedBERT',
+    'TimeAwareMultimodalTransformer': 'TA-MMT',
+    'MultimodalTransformerBaseline': 'Multimodal Transformer',
     'MultiModalBiLSTM': 'BiLSTM',
     'MultiModalTextCNN': 'TextCNN',
     'XGBoost': 'XGBoost',
@@ -54,7 +54,7 @@ LABEL_MAP = {
 
 ORDERED_MODELS = [
     'LogisticRegression', 'XGBoost', 'MultiModalTextCNN', 
-    'MultiModalBiLSTM', 'MultiModalBaselineMedBERT', 'MultiModalTimeAwareMedBERT'
+    'MultiModalBiLSTM', 'MultimodalTransformerBaseline', 'TimeAwareMultimodalTransformer'
 ]
 
 # =============================================================================
@@ -156,10 +156,10 @@ def generate_figure_3(settings=None):
             d = dataset[m]
             prob_true, prob_pred = calibration_curve(d['y_true'], d['y_prob'], n_bins=10, strategy='quantile')
             
-            lw = 3.5 if m == 'MultiModalTimeAwareMedBERT' else 1.5
-            alpha = 1.0 if m == 'MultiModalTimeAwareMedBERT' else 0.8
-            marker = 'o' if m == 'MultiModalTimeAwareMedBERT' else 's'
-            size = 12 if m == 'MultiModalTimeAwareMedBERT' else 7
+            lw = 3.5 if m == 'TimeAwareMultimodalTransformer' else 1.5
+            alpha = 1.0 if m == 'TimeAwareMultimodalTransformer' else 0.8
+            marker = 'o' if m == 'TimeAwareMultimodalTransformer' else 's'
+            size = 12 if m == 'TimeAwareMultimodalTransformer' else 7
             
             ax.plot(prob_pred, prob_true, marker=marker, color=COLOR_PALETTE[m], 
                           label=LABEL_MAP[m], lw=lw, markersize=size, alpha=alpha, markeredgecolor='white')
@@ -223,17 +223,12 @@ def generate_figure_3(settings=None):
     ax_dca.plot(pt_arr, nb_all, color='black', lw=2, linestyle=':', label='Treat All (Baseline)')
     ax_dca.axhline(0, color='gray', lw=2, linestyle='--', label='Treat None')
     
-    # 战略性重构：展示传统校准的崩溃与 TA-MedBERT 原生架构的统治力
+    # 所有模型使用同一配对概率合同；Code-10 将重建 run-specific 输入。
     for m in reversed(models_avail):
-        # 传统基线模型展示它们校准后的状态
         d = data_cal[m]
         label_suffix = " (Calibrated)"
         lw = 2.5; alpha = 0.8
-        
-        # 核心亮点：TA-MedBERT 提取其原生(Uncalibrated)数据，证明其不需要破坏性的事后校准
-        if m == 'MultiModalTimeAwareMedBERT':
-            d = data_uncal[m]  # 使用原生未校准数据
-            label_suffix = " (Native MTL)"
+        if m == 'TimeAwareMultimodalTransformer':
             lw = 4; alpha = 1.0
             
         nb = calculate_net_benefit(d['y_true'], d['y_prob'], pt_arr)

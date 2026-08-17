@@ -7,12 +7,14 @@ from diliplus.models.baselines import (
     MultiModalBaselineMedBERT,
     MultiModalBiLSTM,
     MultiModalTextCNN,
+    MultimodalTransformerBaseline,
     PositionalEncoding,
     StaticProfileEncoder,
 )
 
 __all__ = [
     "MultiModalBaselineMedBERT",
+    "MultimodalTransformerBaseline",
     "MultiModalBiLSTM",
     "MultiModalTextCNN",
     "PositionalEncoding",

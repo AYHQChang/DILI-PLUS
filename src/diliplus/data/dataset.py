@@ -3,8 +3,8 @@ DILI-PLUS | PyTorch 数据集与张量对齐（包实现）
 
 职责：合并动态序列与诊断 Parquet，执行 Token 编码、定长截断、填充和掩码构建。
 输入：03_dili_dual_stream_tensors.parquet、03b_diag_tensors.parquet 及两套词表。
-输出：DILIPlusDataset 单样本字典，包含 9 个模型输入张量和单一 label。
-状态：当前 DILI 单任务训练、评估和解释脚本共用的数据入口。
+输出：DILIPlusDataset 单样本字典，包含 9 个模型输入张量和 AHI-proxy label。
+状态：当前 AHI-proxy 单任务训练、评估和解释脚本共用的数据入口。
 """
 import os
 import json
@@ -22,13 +22,22 @@ class DILIPlusDataset(Dataset):
             self.diag_vocab = json.load(f)
             
         # 2. 读取合并好的 03 数据
-        print("⏳ [DataLoader] Loading and merging dual-stream parquet files...")
+        print("[DILI-PLUS] Loading and merging model parquet files...")
         df_med_lab = pd.read_parquet(os.path.join(data_dir, "03_dili_dual_stream_tensors.parquet"))
         df_diag = pd.read_parquet(os.path.join(data_dir, "03b_diag_tensors.parquet"))
         
         # 使用 Left Join 保证队列完整性
         self.data = pd.merge(df_med_lab, df_diag, on='encounter_id', how='left')
-        self.labels = self.data['label_dili'].values
+        # Formal Code-07 inputs must expose the scientifically accurate label
+        # name. Silently accepting legacy-only artifacts would allow old data
+        # semantics to enter a new run under a canonical model name.
+        self.label_column = 'label_ahi_proxy'
+        if self.label_column not in self.data.columns:
+            raise KeyError(
+                "Formal model data must contain 'label_ahi_proxy'; "
+                "legacy-only 'label_dili' artifacts must be rebuilt"
+            )
+        self.labels = self.data[self.label_column].values
         
         # 预设截断长度 (可根据 VRAM 调整)
         self.max_med_len = max_med_len
@@ -93,6 +102,8 @@ class DILIPlusDataset(Dataset):
             'x_diag': torch.tensor(self._pad_seq(diag_seq, self.max_diag_len, 0), dtype=torch.long),
             'mask_diag': torch.tensor(self._pad_seq([1]*diag_len, self.max_diag_len, 0), dtype=torch.long),
             
+            'label_ahi_proxy': torch.tensor(self.labels[idx], dtype=torch.long),
+            # Short compatibility alias for generic training utilities.
             'label': torch.tensor(self.labels[idx], dtype=torch.long)
         }
 

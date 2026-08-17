@@ -6,15 +6,13 @@ DILI-PLUS | 深度学习训练与后置温度缩放（包实现）
 输入：DILIPlusDataset、词表和模型定义。
 输出：checkpoints/runs/<run_id>/ 下的版本化 artifact，以及同 run 的配对 raw/calibrated
 测试概率与指标。
-状态：当前 DILI 单任务的深度学习主训练路径。
-实现边界：当前模型返回单一 DILI 输出头，实际训练使用 DILI FocalLoss；文件中保留的
-AKI/多任务兼容分支不会被现行 DILIPlusEngine 激活。
+状态：当前 AHI-proxy 单任务的深度学习主训练路径。
+实现边界：所有正式模型从零初始化并返回单一 ``[batch, 2]`` logits；训练使用
+无类别权重的 focal modulation，不包含 AKI、多任务不确定性加权或自校准。
 """
 
 import os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import argparse
 import pandas as pd
@@ -37,8 +35,11 @@ from diliplus.calibration import (
 )
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
-from diliplus.models.diliplus_engine import DILIPlusEngine
-from diliplus.models.baselines import MultiModalTextCNN, MultiModalBiLSTM, MultiModalBaselineMedBERT
+from diliplus.models.registry import (
+    FORMAL_DEEP_MODEL_NAMES,
+    build_formal_deep_model,
+    extract_ahi_proxy_logits,
+)
 from diliplus.reproducibility import (
     DEFAULT_SEED,
     derive_seed,
@@ -47,60 +48,13 @@ from diliplus.reproducibility import (
     seed_everything,
 )
 from diliplus.splits import build_nested_grouped_splits
+from diliplus.training.losses import UnweightedFocalLoss
 
 import warnings
 warnings.filterwarnings("ignore")
 
 # =============================================================================
-# 第一部分：DILI Focal Loss 与保留的多任务兼容损失
-# =============================================================================
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.25, gamma=2.0, reduction='mean'):
-        super(FocalLoss, self).__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.reduction = reduction
-
-    def forward(self, inputs, targets):
-        BCE_loss = F.cross_entropy(inputs, targets, reduction='none')
-        pt = torch.exp(-BCE_loss)
-        F_loss = self.alpha * (1-pt)**self.gamma * BCE_loss
-        
-        if self.reduction == 'mean':
-            return torch.mean(F_loss)
-        elif self.reduction == 'sum':
-            return torch.sum(F_loss)
-        else:
-            return F_loss
-
-class UncertaintyMTLLoss(nn.Module):
-    """
-    通过同方差不确定性(Homoscedastic Uncertainty)自适应调节多任务的损失权重。
-    """
-    def __init__(self, num_tasks=2):
-        super(UncertaintyMTLLoss, self).__init__()
-        # 初始化为0，即可学习的 log(sigma^2)
-        self.log_vars = nn.Parameter(torch.zeros(num_tasks))
-        
-        # 针对不同发病率设定特定的 FocalLoss
-        self.loss_fn_aki = FocalLoss(alpha=0.3, gamma=2.0)
-        self.loss_fn_dili = FocalLoss(alpha=0.25, gamma=2.0)
-
-    def forward(self, logits_aki, logits_dili, targets_aki, targets_dili):
-        loss_0 = self.loss_fn_aki(logits_aki, targets_aki)
-        loss_1 = self.loss_fn_dili(logits_dili, targets_dili)
-        
-        precision_0 = torch.exp(-self.log_vars[0])
-        precision_1 = torch.exp(-self.log_vars[1])
-        
-        loss = precision_0 * loss_0 + self.log_vars[0] + \
-               precision_1 * loss_1 + self.log_vars[1]
-        
-        return loss, loss_0.item(), loss_1.item()
-
-
-# =============================================================================
-# 🌟 第二部分：顶刊级高阶评估指标计算
+# 第二部分：现有评估指标计算（正式统计合同将在 Code-10 完成）
 # =============================================================================
 def calculate_partial_auc(y_true, y_prob, fpr_limit=0.2):
     """计算 FPR <= 0.2 区间内的 Partial AUC，更符合高特异性临床需求。"""
@@ -187,8 +141,16 @@ def calculate_sci_metrics_with_ci(
     }
 
 # =============================================================================
-# 🌟 第三部分：深度学习训练与推理逻辑
+# 第三部分：单任务深度学习训练与推理逻辑
 # =============================================================================
+def _ahi_proxy_labels(batch, device):
+    if "label_ahi_proxy" in batch:
+        return batch["label_ahi_proxy"].to(device)
+    if "label" in batch:
+        return batch["label"].to(device)
+    raise KeyError("Batch is missing the required label_ahi_proxy tensor")
+
+
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
     model.train()
     total_loss = 0.0
@@ -196,26 +158,15 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         # 分离特征与标签
         inputs = {k: v.to(device) for k, v in batch.items() if 'label' not in k}
         
-        # 兼容性处理：无论数据集吐出的是 label_dili 还是 label，都能无缝接管
-        labels_dili = batch.get('label_dili', batch.get('label')).to(device)
-        labels_aki = batch.get('label_aki', batch.get('label')).to(device) 
+        labels = _ahi_proxy_labels(batch, device)
         
         optimizer.zero_grad()
         outputs = model(**inputs)
         
-        # 判断模型是否为双头输出
-        if isinstance(outputs, tuple) and len(outputs) == 2:
-            logits_aki, logits_dili = outputs
-            loss, _, _ = criterion(logits_aki, logits_dili, labels_aki, labels_dili)
-        elif isinstance(outputs, dict) and "logits" in outputs:
-            logits_dili = outputs["logits"]
-            loss = criterion.loss_fn_dili(logits_dili, labels_dili)
-        else:
-            logits_dili = outputs
-            loss = criterion.loss_fn_dili(logits_dili, labels_dili)
+        logits = extract_ahi_proxy_logits(outputs)
+        loss = criterion(logits, labels)
             
         loss.backward()
-        # 梯度裁剪防爆装甲
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         total_loss += loss.item()
@@ -228,20 +179,14 @@ def collect_logits(model, dataloader, device):
     all_logits, all_labels = [], []
     for batch in dataloader:
         inputs = {k: v.to(device) for k, v in batch.items() if 'label' not in k}
-        labels_dili = batch.get('label_dili', batch.get('label')).to(device)
+        labels = _ahi_proxy_labels(batch, device)
         
         outputs = model(**inputs)
         
-        # 提取 DILI 头的 logits
-        if isinstance(outputs, tuple) and len(outputs) == 2:
-            logits_dili = outputs[1]
-        elif isinstance(outputs, dict) and "logits" in outputs:
-            logits_dili = outputs["logits"]
-        else:
-            logits_dili = outputs
+        logits = extract_ahi_proxy_logits(outputs)
             
-        all_logits.append(logits_dili.detach().cpu().numpy())
-        all_labels.extend(labels_dili.cpu().numpy())
+        all_logits.append(logits.detach().cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
     return np.concatenate(all_logits, axis=0), np.asarray(all_labels, dtype=np.int64)
 
 
@@ -261,13 +206,17 @@ def evaluate(
     return metrics, all_preds.tolist(), all_labels.tolist()
 
 # =============================================================================
-# 🌟 第四部分：主控管线 (5折交叉验证 + 15%内部校准)
+# 第四部分：四方 grouped 主控管线
 # =============================================================================
 def main(argv=None, settings=None):
     settings = settings or load_settings()
     seed_everything(settings.reproducibility)
-    parser = argparse.ArgumentParser(description="DILIPLUS Trainer (Ultimate Calibrated Edition)")
-    parser.add_argument('--model', type=str, required=True)
+    parser = argparse.ArgumentParser(
+        description="DILI-PLUS single-task AHI-proxy trainer"
+    )
+    parser.add_argument(
+        '--model', choices=FORMAL_DEEP_MODEL_NAMES, required=True
+    )
     parser.add_argument('--epochs', type=int, default=settings.training.epochs)
     parser.add_argument('--batch_size', type=int, default=settings.training.batch_size)
     parser.add_argument('--lr', type=float, default=settings.training.learning_rate)
@@ -280,6 +229,8 @@ def main(argv=None, settings=None):
         "batch_size": args.batch_size,
         "epochs": args.epochs,
         "lr": args.lr,
+        "weight_decay": settings.training.weight_decay,
+        "focal_gamma": settings.training.focal_gamma,
         "global_seed": settings.reproducibility.global_seed,
         "split_seed": settings.reproducibility.split_seed,
         "bootstrap_seed": settings.reproducibility.bootstrap_seed,
@@ -293,14 +244,6 @@ def main(argv=None, settings=None):
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model_registry = {
-        "MultiModalTextCNN": MultiModalTextCNN,
-        "MultiModalBiLSTM": MultiModalBiLSTM,
-        "MultiModalBaselineMedBERT": MultiModalBaselineMedBERT,
-        "MultiModalTimeAwareMedBERT": DILIPlusEngine,
-        "DILIPlus": DILIPlusEngine
-    }
-    
     vocab_config = load_vocab_sizes(CONFIG["vocab_dir"])
     full_dataset = DILIPlusDataset(CONFIG["data_dir"], CONFIG["vocab_dir"])
     
@@ -315,12 +258,27 @@ def main(argv=None, settings=None):
             "epochs": args.epochs,
             "batch_size": args.batch_size,
             "learning_rate": args.lr,
+            "weight_decay": settings.training.weight_decay,
+            "loss_name": "UnweightedFocalLoss",
+            "focal_gamma": settings.training.focal_gamma,
+            "class_weighting": None,
+            "target_name": "label_ahi_proxy",
+            "task_contract": "single_task_binary_classification",
+            "output_contract": "dict_with_logits_batch_by_2",
+            "initialization": "from_scratch_no_external_pretraining",
+            "external_pretraining": None,
+            "hidden_size": settings.training.hidden_size,
+            "num_heads": settings.training.num_heads,
+            "dropout": settings.training.dropout,
+            "diagnosis_modality_dropout_prob": (
+                settings.training.diagnosis_modality_dropout_prob
+            ),
         },
     )
     
     all_fold_results = []
     print(f"\n==================================================")
-    print(f"🚀 Booting CALIBRATED Model (Full SCI Logic): {args.model} | Device: {device}")
+    print(f"[DILI-PLUS] Training single-task model: {args.model} | Device: {device}")
     print(f"==================================================")
 
     for split in folds:
@@ -356,18 +314,18 @@ def main(argv=None, settings=None):
             num_workers=CONFIG["dataloader_num_workers"],
         )
 
-        model = model_registry[args.model](
-            vocab_med_size=vocab_config["vocab_med_size"],
-            vocab_lab_size=vocab_config["vocab_med_size"], 
-            vocab_diag_size=vocab_config["vocab_diag_size"]
+        model = build_formal_deep_model(
+            args.model, vocab_config, settings.training
         ).to(device)
         
-        # 使用兼容损失容器；当前单一 DILI 输出分支只调用其中的 loss_fn_dili
-        criterion = UncertaintyMTLLoss(num_tasks=2).to(device)
-        optimizer = optim.Adam([
-            {'params': model.parameters()},
-            {'params': criterion.parameters()} # 为可能的双头兼容分支保留参数组
-        ], lr=CONFIG["lr"], weight_decay=1e-5)
+        criterion = UnweightedFocalLoss(
+            gamma=CONFIG["focal_gamma"]
+        ).to(device)
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=CONFIG["lr"],
+            weight_decay=CONFIG["weight_decay"],
+        )
         
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3)
 
@@ -406,7 +364,7 @@ def main(argv=None, settings=None):
                 patience_counter += 1
                 
             if patience_counter >= patience_limit:
-                print(f"   🛑 Early Stopping triggered! No improvement for {patience_limit} epochs.")
+                print(f"   Early stopping: no improvement for {patience_limit} epochs.")
                 break
         
         if best_state is None:
@@ -482,7 +440,7 @@ def main(argv=None, settings=None):
     report_path = metrics_dir / f"{args.model}.csv"
     df_results = pd.DataFrame(all_fold_results)
     df_results.to_csv(report_path, index=False)
-    print(f"📊 Calibration Complete. Metrics saved to {report_path}")
+    print(f"Calibration complete. Metrics saved to {report_path}")
 
 if __name__ == "__main__":
     main()

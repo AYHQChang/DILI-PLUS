@@ -88,6 +88,27 @@ def config_snapshot(settings, training_arguments: dict[str, Any]) -> dict[str, A
             "artifacts.py": file_sha256(Path(__file__)),
             "calibration.py": file_sha256(package_dir / "calibration.py"),
             "splits.py": file_sha256(package_dir / "splits.py"),
+            "models/diliplus_engine.py": file_sha256(
+                package_dir / "models" / "diliplus_engine.py"
+            ),
+            "models/baselines.py": file_sha256(
+                package_dir / "models" / "baselines.py"
+            ),
+            "models/registry.py": file_sha256(
+                package_dir / "models" / "registry.py"
+            ),
+            "training/losses.py": file_sha256(
+                package_dir / "training" / "losses.py"
+            ),
+            "training/deep_trainer_calibrated.py": file_sha256(
+                package_dir / "training" / "deep_trainer_calibrated.py"
+            ),
+            "training/ml_baselines_calibrated.py": file_sha256(
+                package_dir / "training" / "ml_baselines_calibrated.py"
+            ),
+            "data/dataset.py": file_sha256(
+                package_dir / "data" / "dataset.py"
+            ),
         },
         "training_arguments": training_arguments,
     }

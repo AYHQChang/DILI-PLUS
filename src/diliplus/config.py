@@ -59,6 +59,36 @@ class TrainingSettings:
     epochs: int = 50
     batch_size: int = 256
     learning_rate: float = 1e-4
+    weight_decay: float = 1e-5
+    hidden_size: int = 128
+    num_heads: int = 4
+    dropout: float = 0.3
+    diagnosis_modality_dropout_prob: float = 0.15
+    focal_gamma: float = 2.0
+
+    def __post_init__(self) -> None:
+        if self.epochs < 1 or self.batch_size < 1:
+            raise ValueError("training epochs and batch_size must be positive")
+        if self.learning_rate <= 0 or self.weight_decay < 0:
+            raise ValueError("training learning_rate must be positive and weight_decay non-negative")
+        if self.hidden_size < 4 or self.num_heads < 1:
+            raise ValueError(
+                "training hidden_size must be at least 4 and num_heads positive"
+            )
+        if self.hidden_size % 2 != 0:
+            raise ValueError(
+                "training hidden_size must be even for all formal model families"
+            )
+        if self.hidden_size % self.num_heads != 0:
+            raise ValueError("training hidden_size must be divisible by num_heads")
+        if not 0.0 <= self.dropout < 1.0:
+            raise ValueError("training dropout must be in [0, 1)")
+        if not 0.0 <= self.diagnosis_modality_dropout_prob < 1.0:
+            raise ValueError(
+                "training diagnosis_modality_dropout_prob must be in [0, 1)"
+            )
+        if self.focal_gamma < 0:
+            raise ValueError("training focal_gamma must be non-negative")
 
 
 @dataclass(frozen=True)
@@ -209,6 +239,14 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
             epochs=int(training.get("epochs", 50)),
             batch_size=int(training.get("batch_size", 256)),
             learning_rate=float(training.get("learning_rate", 1e-4)),
+            weight_decay=float(training.get("weight_decay", 1e-5)),
+            hidden_size=int(training.get("hidden_size", 128)),
+            num_heads=int(training.get("num_heads", 4)),
+            dropout=float(training.get("dropout", 0.3)),
+            diagnosis_modality_dropout_prob=float(
+                training.get("diagnosis_modality_dropout_prob", 0.15)
+            ),
+            focal_gamma=float(training.get("focal_gamma", 2.0)),
         ),
         prediction=PredictionSettings(
             gap_hours=float(prediction.get("gap_hours", 24.0)),

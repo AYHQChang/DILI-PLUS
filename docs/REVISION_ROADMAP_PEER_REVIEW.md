@@ -98,7 +98,7 @@
 - 药物和化验 Transformer 均为 2 层、4 heads，不是 12 层。
 - 模型包含药物动态流、化验动态流和静态诊断第三模态；“dual-stream”只适合描述两个动态流。
 - 药物和化验虽使用同一词表文件，但模型使用两个独立 embedding 层，不是共享权重空间。
-- 当前实现没有 Med-BERT 式预训练或继承公开 Med-BERT 权重；“TA-MedBERT”可能使读者误以为是预训练模型。应说明是 MedBERT-inspired，或重新命名。
+- 初审时实现没有 Med-BERT 式预训练或继承公开 Med-BERT 权重，“TA-MedBERT”会使读者误以为是预训练模型；Code-07 已采用中性的正式名称并把旧名降为 Python 导入兼容别名。
 
 ### 4.3 诊断特征存在时间泄露风险
 
@@ -400,24 +400,24 @@ Track B：
 - [x] P0-02 修复 target-defining lab 进入动态输入，并固定 24h primary prediction gap；真实数据时序审计 PASS（详见第 15 节）。
 - [x] P0-03 修复诊断 encounter/time 边界，或从主模型删除诊断。已采用严格同次住院及 `create_time < prediction_time`，见第 16 节。
 - [ ] P0-04 核验 ICU/high-acuity 数据来源；未核验前降级场景表述。
-- [ ] P0-05 删除虚构 MTL/self-calibration，校准真实 128-d/2-layer/4-head 架构和时间公式。
-- [ ] P0-06 重建 grouped train/selection/calibration/test 协议，修复 test epoch selection。
-- [ ] P0-07 保存 temperature，并用同一 logits 配对生成 raw/calibrated Figure 3。
+- [x] P0-05 删除虚构 MTL/self-calibration，校准真实 128-d/2-layer/4-head 架构和时间公式。论文首轮降调已完成；Code-07 又从 active code 删除 AKI/MTL/tuple 并固定单任务合同，最终稿仍须同步正式新名称和无 alpha 的 loss。
+- [x] P0-06 重建 grouped train/selection/calibration/test 协议，修复 test epoch selection。Code-05 已完成并通过真实队列 split 审计。
+- [x] P0-07 保存 temperature，并用同一 logits 配对生成 raw/calibrated Figure 3。Code-06 artifact/预测合同已完成；Figure 3 仍待 Code-10 正式 run 重做。
 - [ ] P0-08 修复 early-warning cutoff 语义并重跑 Figure 4。
 - [ ] P0-09 成功重跑 Table 1，明确 patients/encounters/setting。
 - [ ] P0-10 将 Figure 5/6 降级为模型审计，删除剂量、ARR、安全替换和临床建议暗示。
 - [ ] P0-11 生成唯一正式 run，替换论文全部旧数值。
-- [ ] P0-12 删除 `This is TEST.` 并重写 Abstract/Conclusion。
+- [x] P0-12 删除 `This is TEST.` 并重写 Abstract/Conclusion。首轮论文文字已完成；正式结果数字仍待 Code-10/12 同步。
 
 ### P1：提交前必须完成
 
-- [ ] P1-01 固定所有随机种子和 pseudo-index，建立 manifest/run directory。
-- [ ] P1-02 修复/准确描述 Focal Loss alpha。
+- [x] P1-01 固定所有随机种子和 pseudo-index，建立 manifest/run directory。Code-00/04 已完成。
+- [x] P1-02 修复/准确描述 Focal Loss alpha。Code-07 改为 `UnweightedFocalLoss(gamma=2)`，接口不接受 alpha，也不使用类别权重。
 - [ ] P1-03 完成最低消融矩阵和 paired comparison。
 - [ ] P1-04 报告 calibration slope/intercept、Brier、NLL、QECE 细节和完整 DCA。
 - [ ] P1-05 报告每个 horizon 的 N/positive/prevalence/CI。
 - [ ] P1-06 增加 cohort-level explainability 稳定性分析，或把单病例明确降为 illustration。
-- [ ] P1-07 核验 MedBERT 命名和是否存在预训练。
+- [x] P1-07 核验 MedBERT 命名和是否存在预训练。正式名改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`；确认从头训练，旧 MedBERT 名只作 Python 导入兼容。
 - [ ] P1-08 完成 TRIPOD+AI 和 PROBAST+AI 自审。
 - [ ] P1-09 系统核验 references.bib。
 
@@ -479,6 +479,8 @@ Track B：
 | 2026-08-16 | 首轮论文文字修订完成 | 按当前代码重写标题、摘要、引言、方法、结果、讨论和结论；删除不存在的 MTL/self-calibration、药代和临床推荐主张；修正架构、指标和提前时距解释；恢复并降调论文 Figure 7 的模型扰动敏感性分析。详见第 13 节 |
 | 2026-08-16 | P0-02 完成 | 固定 24h prediction gap；重建 46,864 个住院记录的标签和动态序列；强制 `event_time < prediction_time`；目标 ALT/AST 阈值事件、用药越界和化验越界均为 0；保存独立数据与审计产物。详见第 15 节 |
 | 2026-08-16 | P0-03 完成 | 用住院级 `visit_number -> business_uu -> inpatient_f` 桥替代患者级连接；诊断只保留可解析且严格早于 prediction time 的 `create_time`；修复前 30.71% 去重诊断晚于边界，修复后 216,220 条诊断的时间/目标/对齐违规均为 0。详见第 16 节 |
+| 2026-08-17 | Checkpoint-01 完成 | 提交 `2bfe6ef` 冻结 Code-00--06 的泄漏安全数据、四方 split、评价与版本化 artifact 合同；checkpoint 验证见第 19 节 |
+| 2026-08-17 | Code-07 完成 | 正式模型命名、单任务 AHI-proxy 输出、无权重 focal loss、diagnosis-only modality dropout 和 from-scratch 边界已集中实现；删除 active AKI/MTL/tuple 语义；未训练模型或生成性能数字。详见第 19 节 |
 
 ## 13. 已完成：首轮论文文字与 Figure 7 修订（2026-08-16）
 
@@ -519,6 +521,11 @@ Track B：
 | Conclusion | 声称可以辅助调整处方 | 只总结代理结局分类和模型行为审计；临床使用需后续独立验证 | 当前研究尚不支持处方建议或临床部署 |
 | Test text | Abstract 末尾残留 `This is TEST.` | 已删除 | 非论文内容 |
 
+上表记录的是 2026-08-16 首轮论文修订当时的处理轨迹，不应回写成 Code-07 后的当前代码事实。
+尤其是 focal-loss 行中的统一 `0.25` 已在次日的 Code-07 被彻底删除；论文后续必须改为
+`UnweightedFocalLoss(gamma=2)`、无 alpha/类别权重，并同步正式模型新名称。Code-07 本身没有
+修改论文仓库。
+
 ### 13.3 Figure 7：药物 token 扰动敏感性
 
 论文中该图当前自动编号为 **Figure 7**。代码文件仍沿用历史文件名 `Fig_6_InSilico_Simulation.pdf`；LaTeX 图号由前文 `figure` 环境顺序决定，文件名中的 `Fig_6` 不影响编号。
@@ -557,9 +564,9 @@ Track B：
 
 | 原优先级项 | 当前状态 | 说明 |
 |---|---|---|
-| P0-01 结局改称 AHI proxy | 论文文字已完成，代码变量未迁移 | 等待正式数据代码重构 |
+| P0-01 结局改称 AHI proxy | 论文文字及 active Dataset/trainer/model 接口已迁移 | 正式产物必须含 `label_ahi_proxy`；构建器暂时额外写兼容别名，临床 adjudication 仍未开展 |
 | P0-04 ICU/high-acuity 场景降级 | 论文文字已完成，真实科室构成待核验 | 当前使用 hospitalised/inpatient |
-| P0-05 删除 MTL/self-calibration，校准架构描述 | 论文文字已完成 | 不代表 calibration pipeline 已修复 |
+| P0-05 删除 MTL/self-calibration，校准架构描述 | 论文首轮降调、Code-05/06 校准协议和 Code-07 单任务代码均已完成 | 论文仍须同步 Code-07 新正式名及无 alpha loss；性能须正式重跑 |
 | P0-10 图示降级为模型审计 | Figure 7 已完成；Figure 6 图内标签待改 | 正文边界已完成 |
 | P0-12 删除测试文字并重写 Abstract/Conclusion | 当前结果版本已完成 | 正式重跑后仍需更新最终数字 |
 
@@ -571,13 +578,13 @@ Track B：
 |---|---|---|---|---|
 | Image-Fix-01 Figure 6 可见标签 | P0-10 | 在进入数据重构前完成剩余图片降调：把 `Patient 44190`、hepatotoxic/hepatoprotective 和 risk score 改为 row index、model-output attribution 和 model score | `reporting/figures/attribution.py` | 重新生成并替换 Figure 6；PDF 视觉检查确认图内与 caption 一致 |
 | **Code-00 基线保护（已完成）** | Phase 0 | 记录当前 commit、配置、数据/结果文件状态，确保现有轻量测试可运行 | `configs/default.yaml`、测试目录、新 manifest 工具 | 当前样本量、阳性数、关键文件哈希和 split 摘要可复核；不覆盖旧结果 |
-| Code-01 prediction-gap 可行性审计 | P0-02 前置 | 不先选最好结果，仅统计 12/24/48/72h 各时距可用病例、阳性数、事件数和缺失率 | 新审计脚本，复用 `data/labels.py`、`data/sequences.py` | `horizon_counts.csv`、事件密度/缺失率报告；据此固定 primary gap |
-| Code-02 重建 prediction time 与输入边界 | P0-02 | 定义 `t_onset`、`prediction_gap`、`t_prediction`；所有输入严格早于 prediction time；排除 target-defining ALT/AST | `data/labels.py`、`data/sequences.py`、`data/dataset.py`、配置 | 全量 temporal leakage check 为零；0h 与 prospective-gap 数据明确分离 |
+| **Code-01 prediction-gap 可行性审计（已完成）** | P0-02 前置 | 不先选最好结果，仅统计 12/24/48/72h 各时距可用病例、阳性数、事件数和缺失率 | 新审计脚本，复用 `data/labels.py`、`data/sequences.py` | `horizon_counts.csv`、事件密度/缺失率报告；据此固定 primary gap |
+| **Code-02 重建 prediction time 与输入边界（已完成）** | P0-02 | 定义 `t_onset`、`prediction_gap`、`t_prediction`；所有输入严格早于 prediction time；排除 target-defining ALT/AST | `data/labels.py`、`data/sequences.py`、`data/dataset.py`、配置 | 全量 temporal leakage check 为零；0h 与 prospective-gap 数据明确分离 |
 | **Code-03 修复诊断 encounter/time 边界（已完成）** | P0-03 | 诊断仅来自同一 encounter 且在 prediction time 前；无法可靠定时则从主模型移除 | `data/diagnoses.py`、`data/diagnosis_audit.py` | 诊断边界契约测试和真实 Parquet 审计均 PASS；without-diagnosis 消融留到 Code-09 |
 | **Code-04 固定 pseudo-index 与可复现性（已完成）** | P1-01/P0-02 | 固定 DuckDB、Python、NumPy、PyTorch、DataLoader、bootstrap 和绘图随机种子；实现阴性 pseudo-index 敏感性方案 | `data/labels.py`、配置、manifest/run 工具 | 同一 seed 两次运行标签、pseudo-index、fold 和轻量统计完全一致 |
 | **Code-05 重建 grouped split 与 calibration（已完成）** | P0-06/P0-07 | 外层 grouped test；内层 training、selection validation、calibration 分离；test 只评一次 | `training/deep_trainer.py`、`deep_trainer_calibrated.py`、`ml_baselines*.py` | 自动证明 outer-test ID 未参与训练/早停/校准；raw/calibrated 来自同一 logits |
 | **Code-06 统一 checkpoint/inference artifact（已完成）** | P0-07 | checkpoint 同时保存模型、split、epoch、temperature、配置和 run ID；下游统一加载 | 新 artifact 工具、training/evaluation/explainability 调用点 | early-warning、IG、perturbation 明确使用 raw 或 calibrated 输出，不再混称 |
-| Code-07 模型和损失语义清理 | P1-02/P1-07 | 将新代码变量逐步迁移到 AHI proxy；修复或准确命名 focal alpha；明确 from-scratch baseline | `models/`、training loss、配置、报告标签 | 单元测试覆盖输出维度、loss 公式、时间编码和模型命名 |
+| **Code-07 模型和损失语义清理（已完成）** | P1-02/P1-07 | 正式接口迁移到 AHI proxy；移除 focal alpha/类别权重；统一 from-scratch 正式模型命名 | `models/`、training loss、配置、报告标签 | 统一 registry/output helper；语义单元测试覆盖输出维度、loss 公式、时间编码、dropout 和模型命名 |
 | Code-08 重做 cohort/Table 1 | P0-09 | 修复 Table 1 中断；核验 patients、encounters、setting、重复住院和基线肝酶逻辑 | `reporting/table1.py`、cohort audit 工具 | 机器可读 CSV 与论文表逐格一致；场景构成有数据证据 |
 | Code-09 严格 early-warning 与最低消融 | P0-08/P1-03/P1-05 | 所有模型按相同 cutoff 语义重建输入；完成 medication-only、lab-only、without-time、without-diagnosis、full model | `evaluation/early_warning.py`、模型/训练 pipeline | 每个 horizon 报 N/positive/prevalence/CI；每个消融共享 split 和输入边界 |
 | Code-10 正式性能、校准和统计 | P0-11/P1-04 | 生成唯一正式 OOF 结果，完成 AUROC/AUPRC/Brier/NLL、calibration slope/intercept、配对比较和 DCA | training/evaluation/reporting | Table 2、Figure 2/3 和正文数字全部回溯到同一 run manifest |
@@ -586,7 +593,7 @@ Track B：
 
 ### 14.1 下一步建议
 
-Code-01/02 已于 2026-08-16 完成，见第 15 节；Code-03 见第 16 节；Code-00/04 见第 17 节；Code-05/06 见第 18 节。若继续图片清理，仍可完成 **Image-Fix-01：Figure 6 可见标签修订**。下一项核心工作是 **Code-07：模型和损失语义清理**，随后重做 cohort/Table 1、严格 early-warning/消融和正式统计。在 Code-07--10 完成前，不启动或引用正式全模型性能重训结果。
+Code-01/02 已于 2026-08-16 完成，见第 15 节；Code-03 见第 16 节；Code-00/04 见第 17 节；Code-05/06 见第 18 节；Checkpoint-01 与 Code-07 见第 19 节。若继续图片清理，仍可完成 **Image-Fix-01：Figure 6 可见标签修订**。下一项核心工作是 **Code-08：重做 cohort/Table 1**，随后处理 Code-09 严格 early-warning/最低消融；只有这些合同完成后，Code-10 才启动唯一正式性能 run。
 
 ## 15. P0-02 执行记录：目标化验与 prediction time 修复（2026-08-16）
 
@@ -926,4 +933,78 @@ artifact smoke 明确使用随机权重，未训练、未计算性能、不得�
 - 本步骤没有正式模型训练，也没有修改论文性能数字。旧 checkpoint、旧 `predictions_calibrated/`、旧 Table 2 和 Figure 2/3 不能解释为新协议结果。
 - Figure 2/3 的报告脚本仍读取旧目录；其 run-specific paired-output 重做属于 Code-10，当前不会自动把新旧结果混在一起。
 - early-warning 已使用正确 artifact/split/temperature，但逐 horizon 动态 token、lab value 和诊断的 cutoff 合同仍属于 Code-09；当前旧 Figure 4 仍不可复用。
-- Code-07 仍须清理单任务/Focal Loss/模型命名语义，Code-08 重做 cohort/Table 1，Code-09 完成统一消融与 early-warning，Code-10 才启动唯一正式性能 run。
+- Code-07 已在第 19 节完成；下一步是 Code-08 重做 cohort/Table 1，随后 Code-09 完成统一消融与 early-warning，Code-10 才启动唯一正式性能 run。
+
+## 19. Checkpoint-01 与 Code-07 执行记录：模型和损失语义清理（2026-08-17）
+
+### 19.1 Checkpoint-01：先冻结已完成合同
+
+在修改模型语义前，先把 Code-00--06 的数据、split、评价和 artifact 合同提交为代码 commit
+`2bfe6ef`。该 checkpoint 的目的不是宣布性能有效，而是给后续代码和结果提供可回退、可精确
+引用的技术基线。冻结时完成：
+
+- `checkpoint01_tests_v1`：31/31 PASS；
+- `checkpoint01_split_audit_v1`：对 46,864 行真实队列的五折四方 split 审计 PASS，tracked
+  payload SHA-256 为 `24EE4A1E123F576699B07B5D58FD27DCBAF710C392905B139DE944CFBD12E50D`；
+- `checkpoint01_artifact_smoke_v1`：真实格式输入、随机权重的保存/加载 round-trip PASS；没有
+  训练、评价模型表现或生成可用于论文的数字；
+- `checkpoint01_manifest_v1`：重建 aggregate-only baseline manifest，不保存行级患者/住院标识。
+
+### 19.2 Code-07 前的语义问题
+
+1. `DILIPlusEngine`、`MultiModalBaselineMedBERT` 等名字会让读者误以为模型继承 Med-BERT
+   预训练；实际代码没有加载公开 Med-BERT 权重。
+2. trainer 中残留 AKI/uncertainty MTL 类和 tuple 兼容分支，但正式模型只有一个分类任务；这些
+   死分支使论文夸大的多任务叙述看起来似乎“接近实现”。
+3. 旧 focal `alpha=0.25` 对所有样本作统一标量乘法，并不是类别相关 `alpha_t`；它既没有实现
+   alpha-balanced focal loss，也没有提供有意义的类别重加权。
+4. 模型、trainer、评价、解释和图片代码各自硬编码旧模型键，容易让 artifact 名称与实际类
+   语义漂移。
+5. 诊断模态随机屏蔽需要明确为逐样本、只作用于诊断表示；不得把它解释为同时缩放药物和
+   化验信息。
+
+### 19.3 当前正式合同
+
+| 范围 | Code-07 后合同 |
+|---|---|
+| 正式主模型 | `TimeAwareMultimodalTransformer`；报告可简称 TA-MMT |
+| 正式 Transformer 对照 | `MultimodalTransformerBaseline` |
+| 旧 Python 名 | 只作 import compatibility alias；formal registry、训练 CLI、正式流水线生成的新 artifact 和报告标签拒绝旧名 |
+| 初始化 | 所有正式深度模型 from scratch；不加载或继承 Med-BERT 权重 |
+| 任务/输出 | 单任务 AHI-proxy；统一 helper 要求字典中的 `[batch, 2]` logits；无 AKI head/label、MTL、`log_vars` 或 tuple output |
+| 标签 | Dataset 强制要求 `label_ahi_proxy`，通用训练键 `label` 与其同义；只有 `label_dili` 的旧 Parquet 会被拒绝，构建器仅额外写出同值兼容别名 |
+| 损失 | `UnweightedFocalLoss`，默认 `gamma=2`，公式为 `(1-p_t)^gamma * cross_entropy`；无 alpha、无类别权重 |
+| 模态 dropout | 按样本只清零 diagnosis representation；不连带缩放 medication/laboratory representations |
+| 共享配置 | `hidden_size >= 4`、为偶数且能被 `num_heads` 整除，保证四个正式模型均能有效实例化 |
+| artifact | 配置快照记录 formal model/loss contract，并纳入 model、baseline、registry、loss、trainer 和 Dataset 实现哈希；历史别名不得成为正式流水线 artifact model name |
+
+主要实现落点为 `src/diliplus/models/registry.py`、`models/diliplus_engine.py`、
+`models/baselines.py`、`training/losses.py`、`training/deep_trainer_calibrated.py`、
+`data/dataset.py` 和下游 evaluation/explainability/reporting 调用点。兼容 shim 只转发新类，
+不保留第二份算法。
+
+### 19.4 验证状态
+
+| Recorded run | 结果 | 验证内容 |
+|---|---|---|
+| `code07_compileall_v1` | **PASS，0.22 s** | Code-07 涉及的正式 package、pipeline、script 和 tests 通过 Python 语法编译 |
+| `code07_tests_v1` | **44/44 PASS，4.38 s** | 全部既有合同与新增模型/损失测试；其中 11 项专门覆盖 focal 手算公式、`gamma=0` 等价 cross-entropy、无 alpha、旧名拒绝、四模型 `[batch,2]` 有限输出、空 mask、时间编码、eval 确定性、diagnosis-only dropout、tuple 拒绝及 legacy-only 标签拒绝 |
+| `code07_semantic_audit_v1` | **PASS，2.08 s** | fixed synthetic batch、CPU、4/4 formal models；active MTL/AKI 与预训练加载调用命中均为 0；不读患者数据、不训练、不计算性能 |
+| `code07_artifact_smoke_v1` | **PASS，10.59 s** | 用真实格式输入与随机权重 canonical 主模型完成 artifact round-trip；加载前后 logits exact match，raw/calibrated 概率有限且来自同一 logits；不计算性能 |
+
+tracked `manifests/code07_model_loss_contract.json` 的 stable payload SHA-256 为
+`67E07E35176C1352E50544D50C968A04EA1E0D39D6849641F701D3D6579BF944`。四个 recorded run 的
+console 和命令/环境/退出码/日志哈希记录保存在被 Git 忽略的 `reports/run_logs/`。这些证据证明
+结构与执行合同，不是性能证据，也不能替代 Code-10 正式训练。
+
+### 19.5 结果与论文边界
+
+- 本步骤没有正式训练、没有选择模型、没有生成 AUROC/AUPRC/校准/DCA 数字，也没有修改论文
+  仓库。所有旧 checkpoint、旧预测、Table 2 和 Figure 2--7 继续标记为 **pre-Code-07**。
+- 不能把旧结果中的 TA-MedBERT/MM-BaselineMedBERT 标签机械替换成新名后冒充新实验；新正式
+  artifact 必须由修复后数据、formal registry 和唯一 run 重新生成。
+- 论文后续必须同步 `TimeAwareMultimodalTransformer`/TA-MMT、
+  `MultimodalTransformerBaseline`、from-scratch、单任务 AHI proxy、无 alpha/类别权重 focal
+  和 diagnosis-only dropout。该同步只改如实的方法描述；性能数字要等 Code-10 正式 run。
+- 下一步是 **Code-08：重做 cohort/Table 1**，再做 Code-09 early-warning/最低消融，最后才进入
+  Code-10 正式训练与统计。

@@ -35,11 +35,13 @@ python pipelines/01_build_dataset.py --stages diagnoses diagnosis_audit vocabula
 `reports/p0_02_prediction_gap_24h/` 保存时序泄漏审计。诊断通过同次住院桥连接，仅保留
 `diagnosis create_time < prediction_time` 的记录，并在
 `reports/p0_03_diagnosis_time_gap_24h/` 保存源审计和最终 Parquet 契约审计。旧模型和旧预测
-结果不能与修复后数据混用；完成分层划分和校准协议修复前，不应启动正式重训。
+结果不能与修复后数据混用。Code-05/06 已完成分层划分、校准和 artifact 协议修复；在
+Code-08/09 完成 cohort、early-warning 和最低消融合同，并进入 Code-10 的唯一正式 run 前，
+仍不应启动或引用正式性能重训。
 
 需要在 VS Code 中看到完整执行过程时，使用 `Terminal -> Run Task`。当前提供诊断构建、
 Code-00/04 确定性重建、Code-04 pseudo-index 敏感性、Code-05 真实 split 审计、Code-06
-artifact smoke 和 recorded unit tests。命令
+artifact smoke、Code-07 模型/损失语义审计和 recorded unit tests。命令
 输出会同步保存为 `reports/run_logs/<run-id>.log`，同名 JSON 记录命令、commit、dirty 状态、
 process seed、起止时间、退出码和日志哈希。
 
@@ -55,6 +57,8 @@ python scripts/run_recorded.py --run-id deterministic_rebuild_local --seed 20260
 python scripts/run_recorded.py --run-id baseline_manifest_local --seed 20260816 -- python scripts/build_baseline_manifest.py
 python scripts/run_recorded.py --run-id split_audit_local --seed 20260816 -- python scripts/audit_code05_splits.py
 python scripts/run_recorded.py --run-id artifact_smoke_local --seed 20260816 -- python scripts/smoke_code06_artifact.py
+python scripts/run_recorded.py --run-id model_loss_semantics_local --seed 20260816 -- python -m unittest tests.test_model_and_loss_semantics -v
+python scripts/run_recorded.py --run-id code07_semantic_audit_local --seed 20260816 -- python scripts/audit_code07_model_semantics.py
 ```
 
 可提交的 aggregate-only 基线保存在 `manifests/code00_code04_baseline.json`，包含配置、运行
@@ -62,6 +66,9 @@ python scripts/run_recorded.py --run-id artifact_smoke_local --seed 20260816 -- 
 worktree 的内容指纹；它不包含 patient/encounter ID。`reports/p0_04_reproducibility/` 和
 `reports/run_logs/` 是本地详细证据，仍由 `.gitignore` 排除。基线 manifest 可以识别 dirty
 本地状态，但不能替代 Git commit；跨机器复现前仍需人工复核并提交代码。
+
+Checkpoint-01 已在代码提交 `2bfe6ef` 冻结 Code-00--06 的数据、split、评价和 artifact
+合同。Code-07 在该 checkpoint 之上只清理模型/损失语义和兼容边界，不生成性能结果。
 
 ## 评价与模型 artifact 合同
 
@@ -74,6 +81,31 @@ Code-06 artifact 同时保存 model state、四方 split indices/摘要、select
 完整配置快照、run ID 和输入数据/词表指纹。early-warning、IG 和 medication-token
 perturbation 不再重新计算折分或加载裸 `.pth`；run、fold、数据指纹或 raw/calibrated 模式不
 一致时会停止执行。
+
+## 模型与损失语义合同
+
+Code-07 后，正式深度模型名由 [`src/diliplus/models/registry.py`](src/diliplus/models/registry.py)
+集中管理：主模型是 `TimeAwareMultimodalTransformer`，Transformer 对照是
+`MultimodalTransformerBaseline`；另有 `MultiModalTextCNN` 和 `MultiModalBiLSTM`。历史
+Python 类名仅保留为导入兼容别名，不进入 formal registry，也不得写入新的 artifact、报告标签
+或论文方法名称。
+
+四个正式深度模型共享同一架构配置；配置加载时强制 `hidden_size >= 4`、为偶数且能被
+`num_heads` 整除，避免某个已登记模型在极端配置下产生无效层宽。
+
+所有正式深度模型均从随机初始化开始训练，不加载或继承 Med-BERT 权重。任务是单一
+AHI-proxy 二分类；唯一预测输出是字典中的两类 logits，主模型可同时暴露三个模态表示供
+受限的解释/敏感性代码复用；不再存在 AKI head、uncertainty MTL、可学习任务权重或 tuple
+输出分支。正式 Dataset 强制要求
+`label_ahi_proxy`，拒绝只有 `label_dili` 的旧产物；数据构建器暂时额外写出 `label_dili` 作为
+下游兼容别名，但正式训练只使用 AHI-proxy 标签语义。
+
+正式损失为 [`UnweightedFocalLoss`](src/diliplus/training/losses.py)：默认 `gamma=2`，计算
+`(1-p_t)^gamma * cross_entropy`，不接受 `alpha`，也不使用类别权重。主模型的诊断模态
+dropout 按样本只清零诊断表示；不会连带缩放药物或化验表示。Code-07 没有正式训练，所有
+pre-Code-07 checkpoint、预测、表格和图片仍是历史证据，不能因名称清理而升级为当前结果。
+可提交的 aggregate-only 语义证据位于 `manifests/code07_model_loss_contract.json`；审计只用
+固定合成输入在 CPU 验证结构，不读取患者数据、不训练，也不计算性能指标。
 
 ## 目录职责
 

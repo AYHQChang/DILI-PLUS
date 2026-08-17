@@ -1,9 +1,9 @@
 """
 DILI-PLUS | 统一输入接口的深度学习对照模型（包实现）
 
-职责：提供 MultiModalTextCNN、MultiModalBiLSTM 和 MultiModalBaselineMedBERT，
-使其接收与 DILIPlusEngine 相同的用药、化验和诊断输入。
-输出：单一 DILI 二分类 logits。
+职责：提供 MultiModalTextCNN、MultiModalBiLSTM 和从零训练的
+MultimodalTransformerBaseline，使其接收与主模型相同的用药、化验和诊断输入。
+输出：单一 AHI-proxy 二分类 logits。
 状态：当前模型比较实验使用的对照架构。
 维护说明：下方 imports 之前保留的是注释化 V2 参考实现，不参与 Python 执行；
 实际生效的是 V3 类定义，后续目录重构时可迁入 archive/。
@@ -252,7 +252,7 @@ class MultiModalBiLSTM(nn.Module):
         self.lab_lstm = nn.LSTM(hidden_size, hidden_size // 2, num_layers=1, batch_first=True, bidirectional=True)
         self.static_encoder = StaticProfileEncoder(vocab_diag_size, hidden_size, dropout)
         self.fusion_projection = nn.Sequential(nn.Linear(hidden_size * 3, hidden_size), nn.ReLU(), nn.Dropout(dropout))
-        self.dili_head = nn.Linear(hidden_size, 2)
+        self.ahi_proxy_head = nn.Linear(hidden_size, 2)
 
     def forward(self, x_med, dt_med, mask_med, x_lab, v_lab, dt_lab, mask_lab, x_diag, mask_diag):
         v_lab = torch.nan_to_num(v_lab, nan=0.0) # 🔥 净化
@@ -278,7 +278,7 @@ class MultiModalBiLSTM(nn.Module):
 
         h_diag = self.static_encoder(x_diag, mask_diag)
         h_fused = self.fusion_projection(torch.cat([h_med, h_lab, h_diag], dim=-1))
-        return {"logits": self.dili_head(h_fused)}
+        return {"logits": self.ahi_proxy_head(h_fused)}
 
 class MultiModalTextCNN(nn.Module):
     def __init__(self, vocab_med_size, vocab_lab_size, vocab_diag_size, hidden_size=128, dropout=0.3):
@@ -290,7 +290,7 @@ class MultiModalTextCNN(nn.Module):
         self.convs_lab = nn.ModuleList([nn.Conv1d(hidden_size, hidden_size//2, k) for k in [2, 3]])
         self.static_encoder = StaticProfileEncoder(vocab_diag_size, hidden_size, dropout)
         self.fusion_projection = nn.Sequential(nn.Linear((hidden_size//3)*3 + (hidden_size//2)*2 + hidden_size, hidden_size), nn.ReLU(), nn.Dropout(dropout))
-        self.dili_head = nn.Linear(hidden_size, 2)
+        self.ahi_proxy_head = nn.Linear(hidden_size, 2)
 
     def forward(self, x_med, dt_med, mask_med, x_lab, v_lab, dt_lab, mask_lab, x_diag, mask_diag):
         v_lab = torch.nan_to_num(v_lab, nan=0.0) # 🔥 净化
@@ -313,9 +313,10 @@ class MultiModalTextCNN(nn.Module):
         
         h_diag = self.static_encoder(x_diag, mask_diag)
         h_fused = self.fusion_projection(torch.cat([h_med, h_lab, h_diag], dim=-1))
-        return {"logits": self.dili_head(h_fused)}
+        return {"logits": self.ahi_proxy_head(h_fused)}
 
-class MultiModalBaselineMedBERT(nn.Module):
+class MultimodalTransformerBaseline(nn.Module):
+    """From-scratch multimodal Transformer baseline without continuous time encoding."""
     def __init__(self, vocab_med_size, vocab_lab_size, vocab_diag_size, hidden_size=128, num_layers=2, num_heads=4, dropout=0.3):
         super().__init__()
         self.hidden_size = hidden_size
@@ -332,7 +333,7 @@ class MultiModalBaselineMedBERT(nn.Module):
         
         self.static_encoder = StaticProfileEncoder(vocab_diag_size, hidden_size, dropout)
         self.fusion_projection = nn.Sequential(nn.Linear(hidden_size * 3, hidden_size), nn.ReLU(), nn.Dropout(dropout))
-        self.dili_head = nn.Linear(hidden_size, 2)
+        self.ahi_proxy_head = nn.Linear(hidden_size, 2)
 
     def forward(self, x_med, dt_med, mask_med, x_lab, v_lab, dt_lab, mask_lab, x_diag, mask_diag):
         v_lab = torch.nan_to_num(v_lab, nan=0.0) # 🔥 净化
@@ -343,7 +344,15 @@ class MultiModalBaselineMedBERT(nn.Module):
         key_pad_mask_m[key_pad_mask_m.all(dim=1), 0] = False
         
         seq_len_med = x_med.size(1)
-        causal_mask_med = nn.Transformer.generate_square_subsequent_mask(seq_len_med).to(x_med.device)
+        causal_mask_med = torch.triu(
+            torch.ones(
+                seq_len_med,
+                seq_len_med,
+                dtype=torch.bool,
+                device=x_med.device,
+            ),
+            diagonal=1,
+        )
         
         out_m_seq = self.transformer_med(emb_m, mask=causal_mask_med, src_key_padding_mask=key_pad_mask_m)
         out_m_seq = torch.nan_to_num(out_m_seq, nan=0.0) # 🔥 净化
@@ -363,4 +372,9 @@ class MultiModalBaselineMedBERT(nn.Module):
 
         h_diag = self.static_encoder(x_diag, mask_diag)
         h_fused = self.fusion_projection(torch.cat([h_med, h_lab, h_diag], dim=-1))
-        return {"logits": self.dili_head(h_fused)}
+        return {"logits": self.ahi_proxy_head(h_fused)}
+
+
+# Historical import compatibility only; this class has never loaded Med-BERT
+# pretraining weights. Formal experiments use ``MultimodalTransformerBaseline``.
+MultiModalBaselineMedBERT = MultimodalTransformerBaseline

@@ -26,8 +26,11 @@ from diliplus.artifacts import (
 )
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
-from diliplus.models.diliplus_engine import DILIPlusEngine
-from diliplus.models.baselines import MultiModalBiLSTM, MultiModalBaselineMedBERT, MultiModalTextCNN
+from diliplus.models.registry import (
+    FORMAL_DEEP_MODEL_NAMES,
+    build_formal_deep_model,
+    extract_ahi_proxy_logits,
+)
 from diliplus.reproducibility import DEFAULT_SEED, derive_seed, seed_everything
 
 warnings.filterwarnings("ignore")
@@ -145,7 +148,7 @@ def evaluate_lead_time_single_fold(
     
     for batch in dataloader:
         inputs = {k: v.to(device) for k, v in batch.items() if 'label' not in k}
-        labels = batch.get('label_dili', batch.get('label')).to(device)
+        labels = batch.get('label_ahi_proxy', batch.get('label')).to(device)
         
         # 根据预警窗口更新动态序列掩码
         if lead_time_hours > 0:
@@ -172,10 +175,7 @@ def evaluate_lead_time_single_fold(
             
         outputs = model(**inputs)
         
-        # 兼容 tuple、dict 与直接 logits 三种模型输出
-        if isinstance(outputs, tuple) and len(outputs) == 2: logits = outputs[1]
-        elif isinstance(outputs, dict) and "logits" in outputs: logits = outputs["logits"]
-        else: logits = outputs
+        logits = extract_ahi_proxy_logits(outputs)
             
         probs = artifact_probabilities(
             logits.detach().cpu(), artifact_metadata, probability_mode
@@ -210,17 +210,12 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
     
     current_fingerprint = dataset_fingerprint(settings)["payload_sha256"]
 
-    models_to_evaluate = {
-        "MultiModalTextCNN": MultiModalTextCNN,
-        "MultiModalBiLSTM": MultiModalBiLSTM,
-        "MultiModalBaselineMedBERT": MultiModalBaselineMedBERT,
-        "MultiModalTimeAwareMedBERT": DILIPlusEngine
-    }
+    models_to_evaluate = FORMAL_DEEP_MODEL_NAMES
     
     lookahead_windows = [0, 24, 48, 72] # 预警窗口：即刻、提前1天、2天、3天
     all_results = []
     
-    for model_name, model_class in models_to_evaluate.items():
+    for model_name in models_to_evaluate:
         print(f"\n{'='*60}\n⏳ Evaluating Decay for: {model_name}\n{'='*60}")
         
         for lead_time in lookahead_windows:
@@ -233,7 +228,9 @@ def main(settings=None, run_id=None, probability_mode="calibrated"):
                     print(f"   Fold {fold} artifact not found, skipping...")
                     continue
                 
-                model = model_class(**vocab_config).to(device)
+                model = build_formal_deep_model(
+                    model_name, vocab_config, settings.training
+                ).to(device)
                 metadata = load_deep_artifact(
                     artifact_path,
                     model,

@@ -4,9 +4,11 @@
 >
 > 核心原则：**以当前正式代码实现为技术事实，以可追溯结果文件为数值证据；论文文字不能反向证明代码实现。**
 >
-> 最后系统审计：2026-08-16
+> 最后系统审计：2026-08-17
 >
-> 审计基线：代码提交 `cb36322ffb4f55a79203af9f630fd48c4af67ebb`；论文提交 `000fa11a9b785cc21f24683b02ea2720cdb32d59`
+> 当前代码 checkpoint：`2bfe6ef`（Checkpoint-01，冻结 Code-00--06 合同）；Code-07 语义清理建立在该提交之上
+>
+> 论文基线：`000fa11a9b785cc21f24683b02ea2720cdb32d59`；Code-07 本身未修改论文仓库
 
 ## 1. 新对话的一分钟上手说明
 
@@ -92,13 +94,15 @@
 - 仅使用名称匹配到 ALT/AST 的化验。
 - 每次住院的第一次相关化验以 `abnormal_status` 判断基线，而不是用数值 ULN 统一重算。
 - 基线状态必须属于正常/低值集合。
-- 后续任一 ALT 或 AST 数值 `>= 120 U/L` 定义 `label_dili = 1`。
+- 后续任一 ALT 或 AST 数值 `>= 120 U/L` 定义正式列 `label_ahi_proxy = 1`；构建器暂时额外写出同值的 `label_dili` 兼容别名。
 - 首次达到 120 U/L 的时间定义为 `t_onset`。
 - 当前主任务固定 `prediction_gap = 24h`；阳性 `index_time=t_onset`，`prediction_time=t_onset-24h`。
 - 阴性在可形成 24h gap 的观察窗内，用 encounter ID 与固定 seed `20260816` 的哈希生成确定性 pseudo-index，再令 `prediction_time=index_time-24h`。
 - 没有实施 RUCAM/DILIN 药物归因，没有排除休克、脓毒症、病毒性肝炎等所有替代病因。
 
-因此，代码变量虽叫 `label_dili`，论文中更可靠的名称是“biochemistry-defined acute hepatic injury proxy”或“AHI proxy”，不是经过临床判定的 DILI。
+Code-07 后，正式 Dataset/训练接口强制要求 `label_ahi_proxy`，并把通用训练键 `label` 明确定义
+为同一 AHI-proxy 标签；只有 `label_dili` 的旧 Parquet 会被拒绝。因此论文中应使用
+“biochemistry-defined acute hepatic injury proxy”或“AHI proxy”，不是经过临床判定的 DILI。
 
 修复后 24h 数据单独写入 `data_cache/prediction_gap_24h/`，当前为 46,864 encounters、391 AHI-proxy positives。旧 0h/onset-time 数据、checkpoint 和结果不得与该版本混用。
 
@@ -126,14 +130,16 @@
 
 ### 3.5 患者级分组核验
 
-训练器使用 `encounter_id` 下划线前缀作为 `GroupKFold` 分组。对当前数据本地核验结果：
+训练器使用 `encounter_id` 下划线前缀作为 patient group。以下数量是 Code-02 以前 51,316 行
+快照的历史核验，不是当前 46,864 行 prediction-gap 队列的性能证据：
 
 - 51,316 次住院记录。
 - 51,295 个唯一分组/患者号。
 - 21 名患者各有重复住院，共 42 次重复患者住院记录。
 - 分组前缀与队列中的 `health_reco` 完全一致。
 
-因此当前数据快照上的患者级交叉验证隔离成立。若将来更换数据编码规则，必须重新验证这一等价关系，不能只相信变量名。
+Code-05 已对当前 46,864 行队列重新建立五折 `StratifiedGroupKFold`，并自动证明每折四方角色的
+patient-group overlap 为 0。若将来更换数据编码规则，必须重新验证这一等价关系，不能只相信变量名。
 
 ## 4. 模型真实结构
 
@@ -151,21 +157,27 @@
 
 药物和化验项目使用同一份动态词表文件，但模型中是两个独立 `nn.Embedding` 层，不是权重共享的同一个嵌入空间。
 
-### 4.2 TA-MedBERT/DILIPlusEngine 的实际参数
+### 4.2 `TimeAwareMultimodalTransformer` 的实际参数
 
-| 项目 | 当前代码事实 | 论文当前表述 |
+| 项目 | Code-07 后当前代码事实 | 论文后续必须同步 |
 |---|---|---|
-| 主任务 | 单一 DILI/AHI 代理二分类头 | DILI–AKI 多任务正则化 |
-| 隐藏维度 | 128 | 768 |
-| 药物流 Transformer | 2 层、4 heads | 12 层 |
-| 化验流 Transformer | 2 层、4 heads | 架构表未准确表达 |
-| 静态诊断 | 独立第三模态，经池化后参与门控融合 | 主要称“双流”，只在数据治理部分提及 `X_diag` |
-| 时间编码 | 对 `log1p(dt)` 应用可学习频率和相位的 `sin` 分量，加一个线性投影 | 固定的 Transformer 正弦/余弦公式 `10000^(2i/d)` |
-| 时间变量 | 相邻事件间隔；首事件相对首次用药 | 连续时间差，文字大体接近但公式不同 |
-| 融合 | 三模态拼接、投影、门控和动态残差 | “split-gating”但未完整描述当前三模态实现 |
-| 输出 | 单一 2-class logits + 三个模态表示 | 多任务/自校准叙述 |
+| 正式名称 | `TimeAwareMultimodalTransformer`；建议图表简称 TA-MMT | 不再使用会暗示 Med-BERT 权重的 TA-MedBERT |
+| 初始化 | from scratch；不加载、继承或依赖 Med-BERT 预训练权重 | 明确随机初始化，不能称预训练模型 |
+| 主任务 | 单一 AHI-proxy 二分类头 `ahi_proxy_head` | 不得恢复 DILI–AKI 多任务或 self-calibration 叙述 |
+| 隐藏维度 | 默认 128；配置强制 `>=4`、为偶数且能被 head 数整除 | 保持与配置一致，不写 768 |
+| 药物流 Transformer | 2 层、4 heads | 不写 12 层 |
+| 化验流 Transformer | 2 层、4 heads | 准确写出第二动态流 |
+| 静态诊断 | 独立第三模态，经池化后参与门控融合；训练时可逐样本只丢弃诊断表示 | 不把 diagnosis dropout 写成对其他模态的缩放 |
+| 时间编码 | 对 `log1p(dt)` 应用可学习频率和相位的 `sin` 分量，加一个线性投影 | 不使用固定 Transformer 正弦/余弦公式 `10000^(2i/d)` |
+| 时间变量 | 相邻事件间隔；首事件相对首次用药 | 只称时间间隔表示 |
+| 融合 | 三模态拼接、投影、门控和动态残差 | “dual-stream”只能指两个动态流 |
+| 输出 | 字典中的单一 `[batch, 2]` AHI-proxy logits + 三个模态表示 | 不写 AKI head、MTL 或 tuple output |
 
 模型应描述为“药物和化验两个动态流，加一个静态诊断模态的时间感知多模态分类器”。如果保留“dual-stream”，必须明确它只指两个动态流，而不是全部输入只有两种。
+
+旧 Python 名 `DILIPlusEngine` 仅为导入兼容别名；Transformer 对照同理以
+`MultimodalTransformerBaseline` 为正式名，`MultiModalBaselineMedBERT` 仅为兼容别名。正式
+registry、训练 CLI、正式流水线生成的新 artifact 和报告标签不得接受或写入旧名。
 
 ### 4.3 时间编码的准确写法
 
@@ -189,25 +201,32 @@
 - [`src/diliplus/training/deep_trainer_calibrated.py`](../src/diliplus/training/deep_trainer_calibrated.py)
 - [`src/diliplus/training/ml_baselines_calibrated.py`](../src/diliplus/training/ml_baselines_calibrated.py)
 
-六种模型：Logistic Regression、XGBoost、MM-TextCNN、MM-BiLSTM、MM-BaselineMedBERT、MultiModalTimeAwareMedBERT。
+六种正式实验键：Logistic Regression、XGBoost、`MultiModalTextCNN`、`MultiModalBiLSTM`、
+`MultimodalTransformerBaseline`、`TimeAwareMultimodalTransformer`。后四个深度模型名由
+`src/diliplus/models/registry.py` 的 formal registry 集中限定；旧 MedBERT 名不属于正式实验键。
 
 Code-05 后，外层使用固定 seed 的 5 折 `StratifiedGroupKFold`。每个 outer-training pool 按 patient group 分成约 70% parameter-training、15% selection、15% calibration；内层从 128 个确定性 `GroupShuffleSplit` 候选中选择同时含两类且规模/患病率最接近母集的方案。selection 只用于早停/模型选择，calibration 只拟合温度，outer test 只生成一次最终 logits。真实 46,864 条队列的全部 index/group overlap 为 0，证据见 `manifests/code05_split_protocol.json`。
 
-### 5.2 当前训练不是多任务不确定性加权
+### 5.2 当前训练是显式单任务 AHI-proxy 分类
 
-虽然 `deep_trainer_calibrated.py` 定义了 `UncertaintyMTLLoss`、AKI loss 和可学习 `log_vars`，当前 `DILIPlusEngine` 返回单一字典输出。实际训练分支调用：
+Code-07 已从 active trainer 删除 `UncertaintyMTLLoss`、AKI loss、可学习 `log_vars`、AKI 标签/头和
+tuple 输出兼容分支。模型输出由统一 helper 验证为字典中的 `[batch, 2]` AHI-proxy logits，
+优化器只接收模型参数。
 
-```text
-criterion.loss_fn_dili(logits_dili, labels_dili)
-```
-
-该损失不使用 `log_vars`，也没有 AKI 标签或 AKI 输出头。把 `criterion.parameters()` 放进优化器不能使未进入计算图的参数产生多任务正则化。
-
-结论：论文关于 DILI–AKI homoscedastic uncertainty MTL、自适应任务权重、representational Nash equilibrium 和由 MTL 导致的 self-calibration，当前均为 D 级主张。
+结论：当前不存在 DILI–AKI homoscedastic uncertainty MTL、自适应任务权重、representational
+Nash equilibrium 或由 MTL 导致的 self-calibration。旧论文/旧审查中这些表述仍是历史 D 级
+主张；Code-07 的删除是让实现如实收敛为单任务，不是完成了某种 MTL 实验。
 
 ### 5.3 Focal Loss 的实现边界
 
-当前正式校准深度训练使用 Focal Loss，`gamma=2.0`、`alpha=0.25`。但代码中的 `alpha` 是对所有样本统一乘以 0.25，不是按正负类别选择不同 `alpha_t`。`gamma` 会聚焦困难样本，但不能把当前实现写成完整的类别特异性 alpha-balanced focal loss。
+当前正式深度训练使用独立的 `UnweightedFocalLoss`，默认 `gamma=2.0`：
+
+```text
+(1 - p_t)^gamma * cross_entropy
+```
+
+它不接受 `alpha`，也不应用类别权重。论文只能称为 unweighted focal modulation；不得再写固定
+`alpha=0.25`，也不得称为 class-balanced 或 alpha-balanced focal loss。
 
 模型选择使用验证集 AUROC，而不是 AUPRC；论文可说“报告时优先解释 AUPRC”，不能说训练/早停以 AUPRC 为唯一目标。
 
@@ -238,9 +257,11 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 
 论文必须明确 pAUC 是归一化 pAUC，AUDC 也不是单一临床阈值上的净收益。把 AUDC 称为“临床有效性”属于过度解释；它只是当前数据和模型概率下的统计决策曲线摘要。
 
-## 6. 当前结果快照与论文数值对应
+## 6. pre-Code-07 历史结果快照与论文数值对应
 
-以下数据源仍是历史 `reports/05_Calibrated_Results_Table.csv`，不是 Code-05/06 新协议结果。表中数值只用于追溯论文旧稿，不能继续作为修复后性能证据：
+以下数据源仍是历史 `reports/05_Calibrated_Results_Table.csv`，使用旧数据边界、旧 split/artifact
+协议和旧模型命名，不是 Code-05/06/07 后的新协议结果。表中模型名和数值原样保留仅用于
+追溯论文旧稿；不能改贴新正式模型名，也不能继续作为修复后性能证据：
 
 | 模型 | AUROC | AUPRC | Quantile ECE | pAUC@FPR≤0.2 | NetBenefit AUDC |
 |---|---:|---:|---:|---:|---:|
@@ -255,26 +276,29 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 
 - 论文结果正文另写 TA-MedBERT AUPRC 为 `0.7278 ± 0.0705`，与表和 CSV 不一致；`0.7278` 实际接近 BaselineMedBERT 均值，标准差也不对。
 - TA-MedBERT 的校准后 ECE 和 AUDC 不是所有模型最优；不能写“optimal calibration”或“highest Net Benefit”。
-- 当前校准结果中 TA-MedBERT AUPRC 最高，但与 BaselineMedBERT 的差异是否统计显著尚未做配对检验。
+- 该 pre-Code-07 历史校准表中 TA-MedBERT AUPRC 最高，但与 BaselineMedBERT 的差异是否统计显著尚未做配对检验；新正式模型之间的比较必须由 Code-10 重跑。
 - 现有报告只为 AUROC bootstrap 计算置信区间；论文表使用的是折间均值 ± 标准差，不应称作所有指标的 95% CI。
 
 ## 7. 论文章节—代码映射
 
+本节同时保留旧稿主张的审计轨迹。凡引用 51,316/507、TA-MedBERT、旧性能 CSV 或旧 Figure
+2--4 的行，均应理解为 **pre-Code-07 历史证据**，不得与当前 formal registry 或新 artifact 混用。
+
 | 论文位置 | 论文主张 | 代码/产物 | 审计结论 |
 |---|---|---|---|
-| Abstract | 51,316、507、0.99% | `03_dili_dual_stream_tensors.parquet` | A，已由当前本地数据核验 |
+| Abstract | 51,316、507、0.99% | 旧 `03_dili_dual_stream_tensors.parquet` | C，pre-Code-02/07 历史快照可追溯；当前 24h 队列为 46,864/391，最终数字须正式重跑 |
 | Abstract | 右删失消除 immortal time bias | `data/labels.py` | B/D，已实现固定 seed 的确定性 pseudo-index 并完成 5-seed 事件密度审计，但不能宣称“消除”偏倚 |
 | Abstract | 双流药物 + 连续生理信号 | `data/sequences.py`、`models/diliplus_engine.py` | A，但还有第三诊断模态 |
-| Abstract | AUPRC 0.7389 | `05_Calibrated_Results_Table.csv` | A，当前校准结果支持 |
+| Abstract | AUPRC 0.7389 | `05_Calibrated_Results_Table.csv` | C，pre-Code-07 历史结果可追溯，但修复后须重跑 |
 | Abstract | 72h 亚临床检测 | `evaluation/early_warning.py`、`06a...csv` | C，遮蔽逻辑和解释边界需修复后重跑 |
 | Abstract | MTL 带来自校准、QECE 0.0923 | `deep_trainer_calibrated.py` | D，MTL 未激活；0.0923 是温度缩放测试结果 |
 | Introduction contribution 1 | bounded probabilistic right-censoring | `data/labels.py` | A（实施）/D（“unconfounded”“eliminate”效果） |
 | Introduction contribution 2 | continuous harmonic time encoding | `models/diliplus_engine.py` | A（有时间编码）/D（论文公式不符） |
 | Introduction contribution 3 | ontology-guided auditing | `explainability/*` | C/E，局部敏感性存在，但实际替换用硬编码表且无因果识别 |
 | Method: target blinding | 同次住院、严格预测前诊断及 K71/目标文字屏蔽 | `data/diagnoses.py`、`data/diagnosis_audit.py` | A，真实 Parquet 审计 PASS；`create_time` 作为可用时间代理仍须披露 |
-| Method: MTL equation | DILI + AKI | `deep_trainer_calibrated.py` | D，只有未激活兼容类 |
+| Method: MTL equation | DILI + AKI | `deep_trainer_calibrated.py` | D，Code-07 后 active code 已明确删除 AKI/MTL 分支 |
 | Method: model configuration | 768/12 layers | `models/*.py` | D，实际 128/2 layers |
-| Results: model table | 六模型校准指标 | `reports/05_Calibrated_Results_Table.csv` | A，主体数值可追溯 |
+| Results: model table | 六模型校准指标 | `reports/05_Calibrated_Results_Table.csv` | C，主体数值仅作为 pre-Code-07 历史轨迹可追溯 |
 | Results: calibration paradox | 原生 MTL 自校准、温度缩放破坏 TA | raw/calibrated predictions + Figure 3 | D/C，实验不配对、MTL 未激活、ECE 定义混用 |
 | Results: 72h | TA AUPRC 0.11277、保留 12.5% | `reports/06a...csv` | C，数值存在，但实验脚本有已知掩码与概率版本问题 |
 | Results: IG | Clopidogrel +0.085、Metformin -0.101 | `06b_Target_Patient_Attribution.csv` | C，单病例局部模型归因；不是毒性/保护效应 |
@@ -290,7 +314,7 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 | 论文对象 | 生成代码/数据 | 当前状态 |
 |---|---|---|
 | Baseline Table | [`src/diliplus/reporting/table1.py`](../src/diliplus/reporting/table1.py) | 当前保存的 `Table_01_Baseline_Characteristics_DILIPLUS.txt` 只记录 `Query interrupted`；论文表中数值缺少成功的当前报告证据，必须重跑并逐项核对 |
-| Architecture Table | 手写在 `main.tex` | 与代码明显不一致：768/12 层、MTL 等必须改 |
+| Architecture Table | 手写在 `main.tex` | Code-07 后须同步正式新名称、from-scratch、128/2 层、单任务和无 alpha 的 loss 合同 |
 | Performance Table | `reports/05_Calibrated_Results_Table.csv` | 主要数值可追溯；正文存在一处 AUPRC 错写 |
 
 ### 8.2 图片
@@ -312,7 +336,7 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 
 正式实现：[`src/diliplus/evaluation/early_warning.py`](../src/diliplus/evaluation/early_warning.py)
 
-当前报告中 TA-MedBERT：
+pre-Code-07 历史报告中的 TA-MedBERT：
 
 | Horizon | AUROC | AUPRC |
 |---:|---:|---:|
@@ -396,9 +420,9 @@ Code-05 已删除“每个 epoch 查看 outer test 并按 test AUROC 选权重�
 4. ~~把温度参数与对应 fold/model 一起保存。~~ Code-06 artifact 已保存 temperature、epoch、split、config、run ID 和数据指纹。
 5. ~~设立真正独立的 model-selection validation 和 calibration split。~~ Code-05 已建立 training/selection/calibration/test 四方 patient-group 隔离并通过真实队列审计。
 6. ~~未校准训练器不得再使用测试折挑选 epoch。~~ 旧路径已停用，兼容入口转发到同一正式协议。
-7. 对 TA 与 BaselineMedBERT 的 AUPRC 做患者/折配对的统计比较，不仅比较均值。
+7. 对 `TimeAwareMultimodalTransformer` 与 `MultimodalTransformerBaseline` 的 AUPRC 做患者/折配对的统计比较，不仅比较均值。
 8. 修正文中 `0.7278 ± 0.0705` 与性能表不一致。
-9. 统一 Figure 4 的 TA-MedBERT 命名。
+9. 用正式 run 重做 Figure 4，并统一为 `TimeAwareMultimodalTransformer`/TA-MMT 命名。
 10. ~~为诊断特征增加时间和 encounter 边界。~~ 已在 P0-03 改为严格 `diagnosis_time < prediction_time` 并通过真实数据审计。
 
 ### P2：维护性和表达
@@ -487,9 +511,9 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 
 ## 15. 当前建议的大修顺序
 
-1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split 与版本化 artifact 合同。
-2. 下一步先完成 Code-07 模型/损失语义、Code-08 cohort/Table 1 和 Code-09 early-warning/消融合同；Code-10 再执行唯一正式性能 run。
-3. 再决定保留 TA-MedBERT 的哪些创新点；不要先围绕现有夸张叙述补代码。
+1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split、版本化 artifact，以及 Code-07 模型/损失语义合同。
+2. 下一步完成 Code-08 cohort/Table 1 和 Code-09 early-warning/消融合同；Code-10 再执行唯一正式性能 run。
+3. 论文后续统一采用 `TimeAwareMultimodalTransformer`/TA-MMT，并只保留当前实现和新实验真正支持的创新点。
 4. 用新结果重做 Table 1、Table 2、Figure 1b/1d/2/3/4。
 5. 把 Figure 5/6 降级为单病例模型审计，并改掉因果/治疗用语。
 6. 最后重写 Abstract、Methods、Results、Discussion 和 Conclusion，使全文只保留代码与证据真正支持的结论。
@@ -501,5 +525,6 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 | 2026-08-16 | `cb36322...` | `000fa11...` | 首次建立完整论文—代码映射；确认代码为单任务 128 维实现，识别 MTL、架构规模、时间编码、校准、early-warning、Table 1 和扰动因果措辞等主要不一致 |
 | 2026-08-16 | `cb36322...` + dirty worktree hash 见 baseline manifest | 未修改 | 完成 Code-00/04：集中随机配置、5-seed pseudo-index 审计、两次完整数据重建、稳定事件/词表 tie-break、当前 grouped split 摘要和 aggregate-only manifest；21/21 tests PASS；未训练模型 |
 | 2026-08-16 | `cb36322...` + dirty worktree | 未修改 | 完成 Code-05/06：五折四方 patient-group split、selection/calibration 隔离、同一 test logits 配对 raw/calibrated、版本化 deep/sklearn artifact、run-specific 输出和下游 run/fold/mode/data guard；真实 split 与 artifact smoke PASS；未训练正式模型 |
+| 2026-08-17 | `2bfe6ef`（Checkpoint-01）；Code-07 建立于其上 | 未修改 | 冻结 Code-00--06 合同；完成 Code-07：正式模型改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`，旧名仅作 Python 导入兼容；单任务 AHI proxy、unweighted focal (`gamma=2`, no alpha/class weight)、无 AKI/MTL/tuple、逐样本 diagnosis-only dropout、from-scratch；共享配置强制有效 hidden/head 关系；44/44 tests、语义 audit 与 canonical artifact smoke PASS；未训练正式模型，pre-Code-07 结果继续仅作历史证据 |
 
 以后每次完成会改变论文结论的代码修改，都应在此表增加一行。

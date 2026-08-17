@@ -25,7 +25,7 @@ from diliplus.artifacts import (
 )
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
-from diliplus.models.diliplus_engine import DILIPlusEngine
+from diliplus.models.registry import PRIMARY_MODEL_NAME, build_formal_deep_model
 from diliplus.reproducibility import seed_everything
 
 import warnings
@@ -155,16 +155,18 @@ def run_targeted_counterfactual_trajectory(
     vocab_config = load_vocab_sizes(vocab_dir)
     id2med, med2id = load_med_vocab(vocab_dir)
     
-    model = DILIPlusEngine(**vocab_config).to(device)
+    model = build_formal_deep_model(
+        PRIMARY_MODEL_NAME, vocab_config, settings.training
+    ).to(device)
     model_path = deep_artifact_path(
-        settings, run_id, "MultiModalTimeAwareMedBERT", fold_idx
+        settings, run_id, PRIMARY_MODEL_NAME, fold_idx
     )
     metadata = load_deep_artifact(
         model_path,
         model,
         map_location=device,
         expected_run_id=run_id,
-        expected_model_name="MultiModalTimeAwareMedBERT",
+        expected_model_name=PRIMARY_MODEL_NAME,
         expected_fold=fold_idx,
         expected_dataset_fingerprint=dataset_fingerprint(settings)["payload_sha256"],
     )
@@ -317,7 +319,7 @@ def run_targeted_counterfactual_trajectory(
                 h_fused = gate[:, :model.hidden_size] * h_dynamic + gate[:, model.hidden_size:] * h_fused_raw
                 
                 prob_cf = _positive_probability(
-                    model.dili_head(h_fused), metadata, probability_mode
+                    model.ahi_proxy_head(h_fused), metadata, probability_mode
                 )
                 
             trajectory_records.append({
@@ -386,7 +388,7 @@ def run_targeted_counterfactual_trajectory(
                     h_fused = gate[:, :model.hidden_size] * h_dynamic + gate[:, model.hidden_size:] * h_fused_raw
                     
                     prob_sub = _positive_probability(
-                        model.dili_head(h_fused), metadata, probability_mode
+                        model.ahi_proxy_head(h_fused), metadata, probability_mode
                     )
                     
                 trajectory_records.append({

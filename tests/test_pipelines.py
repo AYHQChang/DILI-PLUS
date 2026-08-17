@@ -83,6 +83,16 @@ class PipelineTests(unittest.TestCase):
 
     def test_training_default_mode_is_calibrated(self):
         module = load_pipeline("02_train_models.py")
+        self.assertEqual(
+            module.DEEP_MODELS,
+            (
+                "MultiModalTextCNN",
+                "MultiModalBiLSTM",
+                "MultimodalTransformerBaseline",
+                "TimeAwareMultimodalTransformer",
+            ),
+        )
+        self.assertFalse(any("bert" in name.lower() for name in module.DEEP_MODELS))
         with patch.object(module, "load_settings", return_value="settings"), patch.object(
             module, "run"
         ) as run:

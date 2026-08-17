@@ -1,42 +1,45 @@
-"""Algorithm-preservation checks for the moved Dataset and model classes."""
+"""Source-layout checks that prevent legacy shims from becoming second implementations."""
 
 from __future__ import annotations
 
 import ast
-import hashlib
 import unittest
 from pathlib import Path
 
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-EXPECTED = {
-    "src/diliplus/data/dataset.py": "872d20bb6003aad1275310365c87b3e13694e0d60e9eb474b71f9b754567a970",
-    "src/diliplus/models/baselines.py": "b54d45674bf5da64963a953017d6fa18968d586ec6d9391f7b36980bdd10e623",
-    "src/diliplus/models/diliplus_engine.py": "9993df3dfd7646471b017f6f1a85d976bfd8064323f10de276d58b776eb10a31",
-}
 
-def digest_without_docstrings(path):
-    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
-    for node in ast.walk(tree):
-        body = getattr(node, "body", None)
-        if (
-            isinstance(body, list)
-            and body
-            and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)
-        ):
-            body.pop(0)
-    canonical = ast.dump(tree, include_attributes=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+class SourceLayoutTests(unittest.TestCase):
+    def test_root_model_files_are_thin_shims(self):
+        for relative in ("models/baseline_models.py", "models/diliplus_engine.py"):
+            tree = ast.parse((PROJECT_ROOT / relative).read_text(encoding="utf-8-sig"))
+            class_names = [
+                node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+            ]
+            self.assertEqual(class_names, [], relative)
 
-class AstCompatibilityTests(unittest.TestCase):
-    def test_core_dataset_and_model_ast_is_unchanged(self):
-        actual = {
-            relative: digest_without_docstrings(PROJECT_ROOT / relative)
-            for relative in EXPECTED
+    def test_current_source_uses_truthful_model_class_names(self):
+        engine = ast.parse(
+            (PROJECT_ROOT / "src/diliplus/models/diliplus_engine.py").read_text(
+                encoding="utf-8-sig"
+            )
+        )
+        baseline = ast.parse(
+            (PROJECT_ROOT / "src/diliplus/models/baselines.py").read_text(
+                encoding="utf-8-sig"
+            )
+        )
+        engine_classes = {
+            node.name for node in ast.walk(engine) if isinstance(node, ast.ClassDef)
         }
-        self.assertEqual(actual, EXPECTED)
+        baseline_classes = {
+            node.name for node in ast.walk(baseline) if isinstance(node, ast.ClassDef)
+        }
+        self.assertIn("TimeAwareMultimodalTransformer", engine_classes)
+        self.assertIn("MultimodalTransformerBaseline", baseline_classes)
+        self.assertNotIn("MultiModalBaselineMedBERT", baseline_classes)
+
 
 if __name__ == "__main__":
     unittest.main()

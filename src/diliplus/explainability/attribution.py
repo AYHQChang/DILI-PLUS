@@ -28,7 +28,7 @@ from diliplus.artifacts import (
 )
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
-from diliplus.models.diliplus_engine import DILIPlusEngine
+from diliplus.models.registry import PRIMARY_MODEL_NAME, build_formal_deep_model
 from diliplus.reproducibility import seed_everything
 
 import warnings
@@ -130,10 +130,12 @@ def main(settings=None, run_id=None, probability_mode="calibrated", fold_idx=1):
     med2id = {v: k for k, v in id2med.items()}
     mapping_df = load_translation_mapping(str(settings.paths.drug_mapping))
     
-    model = DILIPlusEngine(**vocab_config).to(device)
+    model = build_formal_deep_model(
+        PRIMARY_MODEL_NAME, vocab_config, settings.training
+    ).to(device)
     
     artifact_path = deep_artifact_path(
-        settings, run_id, "MultiModalTimeAwareMedBERT", fold_idx
+        settings, run_id, PRIMARY_MODEL_NAME, fold_idx
     )
     current_fingerprint = dataset_fingerprint(settings)["payload_sha256"]
     metadata = load_deep_artifact(
@@ -141,7 +143,7 @@ def main(settings=None, run_id=None, probability_mode="calibrated", fold_idx=1):
         model,
         map_location=device,
         expected_run_id=run_id,
-        expected_model_name="MultiModalTimeAwareMedBERT",
+        expected_model_name=PRIMARY_MODEL_NAME,
         expected_fold=fold_idx,
         expected_dataset_fingerprint=current_fingerprint,
     )
@@ -168,7 +170,7 @@ def main(settings=None, run_id=None, probability_mode="calibrated", fold_idx=1):
         
         for idx in sorted(eligible_test_indices):
             tensors = full_dataset[idx]
-            label_val = tensors.get('label_dili', tensors.get('label'))
+            label_val = tensors.get('label_ahi_proxy', tensors.get('label'))
             if label_val is None or label_val.item() != 1: continue 
             
             inputs = {k: v.unsqueeze(0).to(device) for k, v in tensors.items() if 'label' not in k}
@@ -217,7 +219,7 @@ def main(settings=None, run_id=None, probability_mode="calibrated", fold_idx=1):
             print("Strict sensitivity screen found no case; using the prespecified fallback screen...")
             for idx in sorted(eligible_test_indices):
                 tensors = full_dataset[idx]
-                label_val = tensors.get('label_dili', tensors.get('label'))
+                label_val = tensors.get('label_ahi_proxy', tensors.get('label'))
                 if label_val is None or label_val.item() != 1: continue 
                 
                 med_ids = tensors['x_med'].tolist()

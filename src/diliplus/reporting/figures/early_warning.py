@@ -32,8 +32,8 @@ plt.rcParams.update({
 })
 
 COLOR_PALETTE = {
-    'MultiModalTimeAwareMedBERT': '#DF9E9B',  # TA-MedBERT: 浅粉红
-    'MultiModalBaselineMedBERT': '#99BADF',   # Baseline: 淡蓝
+    'TimeAwareMultimodalTransformer': '#DF9E9B',
+    'MultimodalTransformerBaseline': '#99BADF',
     'MultiModalBiLSTM': '#99CDCE',            # BiLSTM: 淡青
     'MultiModalTextCNN': '#F8BF92',           # CNN: 浅橙
     'XGBoost': '#999ACD',                     # XGBoost: 淡紫
@@ -41,8 +41,8 @@ COLOR_PALETTE = {
 }
 
 LABEL_MAP = {
-    'MultiModalTimeAwareMedBERT': 'TA-MedBERT',
-    'MultiModalBaselineMedBERT': 'Baseline MedBERT',
+    'TimeAwareMultimodalTransformer': 'TA-MMT',
+    'MultimodalTransformerBaseline': 'Multimodal Transformer',
     'MultiModalBiLSTM': 'BiLSTM',
     'MultiModalTextCNN': 'TextCNN',
     'XGBoost': 'XGBoost',
@@ -51,11 +51,11 @@ LABEL_MAP = {
 
 # ORDERED_MODELS = [
 #     'LogisticRegression', 'XGBoost', 'MultiModalTextCNN', 
-#     'MultiModalBiLSTM', 'MultiModalBaselineMedBERT', 'MultiModalTimeAwareMedBERT'
+#     'MultiModalBiLSTM', 'MultimodalTransformerBaseline', 'TimeAwareMultimodalTransformer'
 # ]
 
 ORDERED_MODELS = [
-    'MultiModalBiLSTM', 'MultiModalBaselineMedBERT', 'MultiModalTimeAwareMedBERT'
+    'MultiModalBiLSTM', 'MultimodalTransformerBaseline', 'TimeAwareMultimodalTransformer'
 ]
 
 # 安全解析含有置信区间字符串的数据 (如 "0.85 (0.81-0.89)")
@@ -109,11 +109,11 @@ def generate_early_warning_figure(settings=None):
             
             y_vals = m_data[metric_col].values
             color = COLOR_PALETTE[m]
-            lw = 4.5 if m == 'MultiModalTimeAwareMedBERT' else 2.5
-            alpha = 1.0 if m == 'MultiModalTimeAwareMedBERT' else 0.8
-            marker = 'o' if m == 'MultiModalTimeAwareMedBERT' else 's'
-            markersize = 12 if m == 'MultiModalTimeAwareMedBERT' else 8
-            zorder = 10 if m == 'MultiModalTimeAwareMedBERT' else 1
+            lw = 4.5 if m == 'TimeAwareMultimodalTransformer' else 2.5
+            alpha = 1.0 if m == 'TimeAwareMultimodalTransformer' else 0.8
+            marker = 'o' if m == 'TimeAwareMultimodalTransformer' else 's'
+            markersize = 12 if m == 'TimeAwareMultimodalTransformer' else 8
+            zorder = 10 if m == 'TimeAwareMultimodalTransformer' else 1
             
             ax.plot(x_labels, y_vals, marker=marker, color=color, label=LABEL_MAP[m], 
                     lw=lw, markersize=markersize, alpha=alpha, markeredgecolor='white', markeredgewidth=1.5, zorder=zorder)

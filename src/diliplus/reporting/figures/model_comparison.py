@@ -36,8 +36,8 @@ plt.rcParams.update({
 
 # 严格对齐您的专属马卡龙色卡
 COLOR_PALETTE = {
-    'MultiModalTimeAwareMedBERT': '#DF9E9B',  # TA-MedBERT: 浅粉红
-    'MultiModalBaselineMedBERT': '#99BADF',   # Baseline: 淡蓝
+    'TimeAwareMultimodalTransformer': '#DF9E9B',
+    'MultimodalTransformerBaseline': '#99BADF',
     'MultiModalBiLSTM': '#99CDCE',            # BiLSTM: 淡青
     'MultiModalTextCNN': '#F8BF92',           # CNN: 浅橙
     'XGBoost': '#999ACD',                     # XGBoost: 淡紫
@@ -45,18 +45,18 @@ COLOR_PALETTE = {
 }
 
 LABEL_MAP = {
-    'MultiModalTimeAwareMedBERT': 'TA-MedBERT',
-    'MultiModalBaselineMedBERT': 'Baseline MedBERT',
+    'TimeAwareMultimodalTransformer': 'TA-MMT',
+    'MultimodalTransformerBaseline': 'Multimodal Transformer',
     'MultiModalBiLSTM': 'BiLSTM',
     'MultiModalTextCNN': 'TextCNN',
     'XGBoost': 'XGBoost',
     'LogisticRegression': 'Logistic Regression'
 }
 
-# 模型排序：TA-MedBERT 永远在最醒目的位置 (最后画，图层最上)
+# 模型排序：主模型最后绘制，位于最上层
 ORDERED_MODELS = [
     'LogisticRegression', 'XGBoost', 'MultiModalTextCNN', 
-    'MultiModalBiLSTM', 'MultiModalBaselineMedBERT', 'MultiModalTimeAwareMedBERT'
+    'MultiModalBiLSTM', 'MultimodalTransformerBaseline', 'TimeAwareMultimodalTransformer'
 ]
 
 # =============================================================================
@@ -202,7 +202,7 @@ def generate_advanced_figure_2(settings=None):
     # --- Panel B: 钢琴/提琴图 ---
     palette_violin = {LABEL_MAP[k]: COLOR_PALETTE[k] for k in models_avail}
     
-    # 增加顺序控制：将可用模型列表逆序，强制使 TA-MedBERT 位于最上方
+    # 将可用模型列表逆序，使主模型位于最上方
     order_labels = [LABEL_MAP[m] for m in reversed(models_avail)]
     
     sns.violinplot(data=violin_df, x='Probability', y='Model', ax=ax_violin, 
@@ -235,15 +235,15 @@ def generate_advanced_figure_2(settings=None):
     for m in models_avail:  # 按原始顺序绘制，底层线先画
         data = model_data[m]
         color = COLOR_PALETTE[m]
-        zorder = 10 if m == 'MultiModalTimeAwareMedBERT' else 1
-        lw = 4.0 if m == 'MultiModalTimeAwareMedBERT' else 2.5
-        alpha_line = 1.0 if m == 'MultiModalTimeAwareMedBERT' else 0.8
+        zorder = 10 if m == 'TimeAwareMultimodalTransformer' else 1
+        lw = 4.0 if m == 'TimeAwareMultimodalTransformer' else 2.5
+        alpha_line = 1.0 if m == 'TimeAwareMultimodalTransformer' else 0.8
         
         label_roc = f"{LABEL_MAP[m]} (AUC = {data['mean_roc']:.3f})"
         ax_dca.plot(common_fpr, data['mean_tpr'], color=color, label=label_roc, lw=lw, alpha=alpha_line, zorder=zorder)
         
-        # 仅为 TA-MedBERT 绘制 95% 阴影带，保持画面整洁
-        if m == 'MultiModalTimeAwareMedBERT':
+        # 仅为主模型绘制 95% 阴影带，保持画面整洁
+        if m == 'TimeAwareMultimodalTransformer':
             ci_upper = np.minimum(data['mean_tpr'] + 1.96 * data['std_tpr'], 1)
             ci_lower = np.maximum(data['mean_tpr'] - 1.96 * data['std_tpr'], 0)
             ax_dca.fill_between(common_fpr, ci_lower, ci_upper, color=color, alpha=0.3, zorder=zorder-1, edgecolor='none')
@@ -267,14 +267,14 @@ def generate_advanced_figure_2(settings=None):
     for m in models_avail:
         data = model_data[m]
         color = COLOR_PALETTE[m]
-        zorder = 10 if m == 'MultiModalTimeAwareMedBERT' else 1
-        lw = 4.0 if m == 'MultiModalTimeAwareMedBERT' else 2.5
-        alpha_line = 1.0 if m == 'MultiModalTimeAwareMedBERT' else 0.8
+        zorder = 10 if m == 'TimeAwareMultimodalTransformer' else 1
+        lw = 4.0 if m == 'TimeAwareMultimodalTransformer' else 2.5
+        alpha_line = 1.0 if m == 'TimeAwareMultimodalTransformer' else 0.8
         
         label_pr = f"{LABEL_MAP[m]} (AUPRC = {data['mean_prc']:.3f})"
         ax_calib.plot(common_recall, data['mean_prec'], color=color, label=label_pr, lw=lw, alpha=alpha_line, zorder=zorder)
         
-        if m == 'MultiModalTimeAwareMedBERT':
+        if m == 'TimeAwareMultimodalTransformer':
             ci_upper_pr = np.minimum(data['mean_prec'] + 1.96 * data['std_prec'], 1)
             ci_lower_pr = np.maximum(data['mean_prec'] - 1.96 * data['std_prec'], 0)
             ax_calib.fill_between(common_recall, ci_lower_pr, ci_upper_pr, color=color, alpha=0.3, zorder=zorder-1, edgecolor='none')

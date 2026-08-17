@@ -8,13 +8,9 @@ from _bootstrap import PROJECT_ROOT, bootstrap
 
 bootstrap()
 from diliplus.config import load_settings
+from diliplus.models.registry import FORMAL_DEEP_MODEL_NAMES
 
-DEEP_MODELS = (
-    "MultiModalTextCNN",
-    "MultiModalBiLSTM",
-    "MultiModalBaselineMedBERT",
-    "MultiModalTimeAwareMedBERT",
-)
+DEEP_MODELS = FORMAL_DEEP_MODEL_NAMES
 ML_MODELS = ("LogisticRegression", "XGBoost")
 
 def run(settings, run_id, mode="calibrated"):

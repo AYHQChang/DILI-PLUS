@@ -23,7 +23,7 @@ from diliplus.artifacts import (
 )
 from diliplus.config import load_settings
 from diliplus.data.dataset import DILIPlusDataset, load_vocab_sizes
-from diliplus.models.diliplus_engine import DILIPlusEngine
+from diliplus.models.registry import PRIMARY_MODEL_NAME, build_formal_deep_model
 from diliplus.reproducibility import seed_everything
 from diliplus.splits import build_nested_grouped_splits
 
@@ -44,7 +44,9 @@ def main() -> int:
     labels = np.asarray(dataset.labels, dtype=np.int64)
     split = build_nested_grouped_splits(encounter_ids, labels, settings)[0]
     model_kwargs = load_vocab_sizes(settings.paths.vocab)
-    model = DILIPlusEngine(**model_kwargs).cpu().eval()
+    model = build_formal_deep_model(
+        PRIMARY_MODEL_NAME, model_kwargs, settings.training
+    ).cpu().eval()
     dataset_index = int(split.test[0])
     inputs = _batch(dataset[dataset_index])
     with torch.no_grad():
@@ -53,14 +55,21 @@ def main() -> int:
     metadata = build_artifact_metadata(
         artifact_type="torch",
         run_id="code06-smoke",
-        model_name="MultiModalTimeAwareMedBERT",
+        model_name=PRIMARY_MODEL_NAME,
         fold=1,
         selected_epoch=0,
         temperature=1.7,
         split_payload=split.checkpoint_payload(),
         dataset=dataset_fingerprint(settings),
         configuration=config_snapshot(
-            settings, {"purpose": "random-weight artifact roundtrip smoke; no training"}
+            settings,
+            {
+                "purpose": "random-weight artifact roundtrip smoke; no training",
+                "target_name": "label_ahi_proxy",
+                "task_contract": "single_task_binary_classification",
+                "initialization": "from_scratch_no_external_pretraining",
+                "formal_model_name": PRIMARY_MODEL_NAME,
+            },
         ),
     )
     output_dir = settings.paths.reports / "p0_05_code_06" / "code06_smoke"
@@ -68,12 +77,14 @@ def main() -> int:
     artifact_path = output_dir / "random_weight_fold_01.pt"
     save_deep_artifact(artifact_path, model, metadata)
 
-    restored = DILIPlusEngine(**model_kwargs).cpu().eval()
+    restored = build_formal_deep_model(
+        PRIMARY_MODEL_NAME, model_kwargs, settings.training
+    ).cpu().eval()
     loaded = load_deep_artifact(
         artifact_path,
         restored,
         expected_run_id="code06-smoke",
-        expected_model_name="MultiModalTimeAwareMedBERT",
+        expected_model_name=PRIMARY_MODEL_NAME,
         expected_fold=1,
         expected_dataset_fingerprint=metadata["dataset_fingerprint"]["payload_sha256"],
     )

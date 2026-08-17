@@ -5,7 +5,7 @@ DILI-PLUS | 温度缩放后的传统机器学习基线（包实现）
 training/selection/calibration/test 四方 grouped split，并仅对 outer test 推理一次。
 输入：03_dili_dual_stream_tensors.parquet、03b_diag_tensors.parquet。
 输出：run-specific 配对 raw/calibrated 预测、指标和版本化 sklearn artifact。
-状态：当前 DILI 单任务的传统机器学习主评估路径。
+状态：当前 AHI-proxy 单任务的传统机器学习主评估路径。
 说明：固定超参数基线不读取 selection partition；该分区仍保留以维持统一协议。
 """
 
@@ -129,7 +129,7 @@ def calculate_sci_metrics_with_ci(
 # 🌟 第三部分：数据加载与主控循环
 # =============================================================================
 def load_and_flatten_data(data_dir):
-    print("⏳ [ML Baseline] Loading DILIPLUS Tensors and Flattening to TF-IDF corpus...")
+    print("[ML Baseline] Loading tensors and flattening to a TF-IDF corpus...")
     df_med_lab = pd.read_parquet(os.path.join(data_dir, "03_dili_dual_stream_tensors.parquet"))
     df_diag = pd.read_parquet(os.path.join(data_dir, "03b_diag_tensors.parquet"))
     df = pd.merge(df_med_lab, df_diag, on='encounter_id', how='left')
@@ -156,7 +156,7 @@ def main(argv=None, settings=None):
     metrics_dir.mkdir(parents=True, exist_ok=True)
     
     df = load_and_flatten_data(data_dir)
-    y = df['label_dili'].values
+    y = df['label_ahi_proxy'].values
     
     models_to_train = {
         "LogisticRegression": LogisticRegression(
@@ -180,7 +180,7 @@ def main(argv=None, settings=None):
     data_fingerprint = dataset_fingerprint(settings)
     all_fold_results = []
     
-    print(f"🚀 [ML Baseline] Starting 5-Fold Evaluation with Temperature Scaling...")
+    print("[ML Baseline] Starting 5-fold evaluation with temperature scaling...")
     for model_name, model_obj in models_to_train.items():
         print(f"\n{'='*50}\nEvaluating Model: {model_name}\n{'='*50}")
         
@@ -188,6 +188,8 @@ def main(argv=None, settings=None):
             settings,
             {
                 "model": model_name,
+                "target_name": "label_ahi_proxy",
+                "task_contract": "single_task_binary_classification",
                 "representation": "TF-IDF",
                 "estimator_parameters": model_obj.get_params(deep=False),
                 "selection_partition_usage": "reserved_not_used_fixed_hyperparameters",

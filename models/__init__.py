@@ -8,11 +8,15 @@ from diliplus.models import (
     MultiModalBaselineMedBERT,
     MultiModalBiLSTM,
     MultiModalTextCNN,
+    MultimodalTransformerBaseline,
+    TimeAwareMultimodalTransformer,
 )
 
 __all__ = [
     "DILIPlusEngine",
+    "TimeAwareMultimodalTransformer",
     "MultiModalBaselineMedBERT",
+    "MultimodalTransformerBaseline",
     "MultiModalBiLSTM",
     "MultiModalTextCNN",
 ]

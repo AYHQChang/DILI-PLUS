@@ -109,6 +109,27 @@
       }
     },
     {
+      "label": "DILI-PLUS: Code-07 model/loss semantic audit",
+      "type": "process",
+      "command": "D:\\Anaconda\\envs\\ML311\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code07_model_loss_audit_vscode",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\envs\\ML311\\python.exe",
+        "${workspaceFolder}\\scripts\\audit_code07_model_semantics.py"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "DILI-PLUS: recorded unit tests",
       "type": "process",
       "command": "D:\\Anaconda\\envs\\ML311\\python.exe",

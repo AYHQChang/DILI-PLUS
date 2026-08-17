@@ -1237,3 +1237,22 @@ Brier/NLL 也劣于五个比较器（本次 20-test/mode correction family 内 H
 按预注册选择规则，校准后 pooled AUPRC 最高的深度比较器是 `MultiModalTextCNN`
 （0.0864），因此后续三种子稳定性只比较它与 primary；不能改选另一个对主模型更有利的
 比较器。128/8 架构敏感性仍单列，不与六模型主表混合。
+
+### 21.3 128维/8头架构敏感性
+
+`code10_sensitivity_128d8h_seed0` 从 clean commit `2b60501` 启动并 **PASS**，耗时
+1,181.33 s（19.69 min）。只重训受 attention head 数影响的 Transformer baseline 与 primary；
+其他四个模型不受该参数影响。数据、五折 split、seed index 0、128 hidden、optimizer、loss 和
+AUPRC early stopping 均与主分析一致。
+
+| Model | 4-head calibrated AUPRC | 8-head calibrated AUPRC (95% CI) | 8h-4h paired delta (95% CI) |
+|---|---:|---:|---:|
+| MultimodalTransformerBaseline | 0.0699 | 0.0652 (0.0518--0.0826) | -0.0047 (-0.0170--0.0035) |
+| TimeAwareMultimodalTransformer | 0.0678 | 0.0844 (0.0646--0.1163) | +0.0167 (-0.0023--0.0371) |
+
+8头 primary 的 AUPRC 方向上较高，但 95% CI 跨0，Holm-adjusted `p=0.3896`；因此不能称为
+确定改进，也不能据此替换预注册4头主分析。8头 primary 的 Brier 相对4头下降0.000706
+（95% CI -0.001011 至 -0.000431）且 NLL 下降0.002728（-0.003776 至 -0.001654），在本次
+8-test/mode correction family 中 Holm-adjusted `p=0.01598`。这说明概率误差对 head 数敏感，
+但不改变“主模型没有优于传统基线”的主结论。配对证据见
+`manifests/code10_architecture_sensitivity.json`。

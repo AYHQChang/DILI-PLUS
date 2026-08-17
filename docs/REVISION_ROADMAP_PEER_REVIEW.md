@@ -1142,5 +1142,5 @@ demographic baseline。所有消融复用 `DILIPlusDataset` 九输入、同一 g
   同步 CSV，不得手工抄用旧表。
 - Code-09 的输入和训练入口已具备；performance CI、minimum-ablation paired comparison 和
   Figure 4 属于 Code-10 唯一正式 run。
-- Code-10 前仍应提交当前代码/manifest 作为新 checkpoint，避免训练时 dirty implementation
-  无法精确引用。
+- 当前代码/manifest 已提交为 Code-08/09 checkpoint `cc7d434`；Code-10 必须从该提交或明确的
+  后继标签合同提交启动，避免训练时 dirty implementation 无法精确引用。

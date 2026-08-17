@@ -77,6 +77,8 @@ worktree 的内容指纹；它不包含 patient/encounter ID。`reports/p0_04_re
 
 Checkpoint-01 已在代码提交 `2bfe6ef` 冻结 Code-00--06 的数据、split、评价和 artifact
 合同。Code-07 在该 checkpoint 之上只清理模型/损失语义和兼容边界，不生成性能结果。
+Code-08/09 的 cohort/Table 1、strict early-warning 和最低消融合同冻结在提交 `cc7d434`；该
+提交仍没有正式训练或性能结果。
 
 ## 评价与模型 artifact 合同
 

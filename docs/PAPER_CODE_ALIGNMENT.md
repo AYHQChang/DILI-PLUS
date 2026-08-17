@@ -530,6 +530,6 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 | 2026-08-16 | `cb36322...` + dirty worktree hash 见 baseline manifest | 未修改 | 完成 Code-00/04：集中随机配置、5-seed pseudo-index 审计、两次完整数据重建、稳定事件/词表 tie-break、当前 grouped split 摘要和 aggregate-only manifest；21/21 tests PASS；未训练模型 |
 | 2026-08-16 | `cb36322...` + dirty worktree | 未修改 | 完成 Code-05/06：五折四方 patient-group split、selection/calibration 隔离、同一 test logits 配对 raw/calibrated、版本化 deep/sklearn artifact、run-specific 输出和下游 run/fold/mode/data guard；真实 split 与 artifact smoke PASS；未训练正式模型 |
 | 2026-08-17 | `2bfe6ef`（Checkpoint-01）；Code-07 建立于其上 | 未修改 | 冻结 Code-00--06 合同；完成 Code-07：正式模型改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`，旧名仅作 Python 导入兼容；单任务 AHI proxy、unweighted focal (`gamma=2`, no alpha/class weight)、无 AKI/MTL/tuple、逐样本 diagnosis-only dropout、from-scratch；共享配置强制有效 hidden/head 关系；44/44 tests、语义 audit 与 canonical artifact smoke PASS；未训练正式模型，pre-Code-07 结果继续仅作历史证据 |
-| 2026-08-17 | `d22a827` + Code-08/09 dirty worktree | 未修改 | Code-08 真实 Table 1 查询 PASS：46,864 encounters、46,844 patients、391 positives，所有 encounter-level join inflation=1，证实全院住院混合场景；Code-09 24/48/72 h 三模态 strict cutoff 与 6 项最低消融合同 PASS；未训练/未估计性能，baseline lab 并列项标签决策待冻结 |
+| 2026-08-17 | `cc7d434` | 未修改 | 完成并冻结 Code-08/09：真实 Table 1 查询 PASS（46,864 encounters、46,844 patients、391 positives；所有 encounter-level join inflation=1），证实全院住院混合场景；24/48/72 h 三模态 strict cutoff 与 6 项最低消融合同 PASS；未训练/未估计性能，baseline lab 并列项标签决策待冻结 |
 
 以后每次完成会改变论文结论的代码修改，都应在此表增加一行。

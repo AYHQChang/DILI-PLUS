@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "contract": "post_hoc_p1_reporting_audit_v1",
+  "status": "PASS",
+  "generated_utc": "2026-08-18T06:26:46.455434+00:00",
+  "run_id": "code12_p1_supplementary",
+  "formal_run_id": "code10_formal_128d4h_seed0",
+  "analysis_status": "post_hoc_descriptive_audit_not_used_for_formal_model_ranking",
+  "bootstrap_replicates": 1000,
+  "process_baseline": {
+    "model": "unweighted logistic regression",
+    "features": "observation duration, modality counts/densities, and availability only; no clinical token identity or value",
+    "AUPRC": 0.0831933065990591,
+    "AUROC": 0.843358198049506,
+    "Brier": 0.00678952191248,
+    "NLL": 0.0346943360391444,
+    "Calibration_Slope": 0.9864096371702356,
+    "Observed_Expected_Ratio": 1.0034123929050882
+  },
+  "subgroup_audit": {
+    "models": [
+      "LogisticRegression",
+      "ObservationProcessBaseline",
+      "TimeAwareMultimodalTransformer",
+      "XGBoost"
+    ],
+    "dimensions": [
+      "Observation window",
+      "Sex"
+    ],
+    "interpretation": "descriptive heterogeneity/process audit; not proof of fairness or transportability"
+  },
+  "rendering_environment": {
+    "python": "3.13.5 | packaged by Anaconda, Inc. | (main, Jun 12 2025, 16:37:03) [MSC v.1929 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.22000-SP0",
+    "pandas": "2.2.3",
+    "matplotlib": "3.10.0",
+    "backend": "Agg"
+  },
+  "assets": [
+    {
+      "path": "figures/Fig_S1_Calibration_Decision_Curves.png",
+      "bytes": 1501600,
+      "sha256": "BC77FDCE0E51E7E2CBACC10A3D99B9585A7C00F2FBBE2192C33478F8DE28F7CC"
+    },
+    {
+      "path": "figures/Fig_S1_Calibration_Decision_Curves.pdf",
+      "bytes": 41751,
+      "sha256": "500DE08E554C72801C224A3C558AD0D03AB7924F084333FAC06ECDC7295E0404"
+    },
+    {
+      "path": "figures/Fig_S2_Subgroup_Process_Audit.png",
+      "bytes": 581437,
+      "sha256": "462AEA6145EFDF341F0B007DD49FB8821F0C30B1006954B1CB51DD11B18AC88A"
+    },
+    {
+      "path": "figures/Fig_S2_Subgroup_Process_Audit.pdf",
+      "bytes": 36098,
+      "sha256": "92F8310AC82F5667AE6CF32D601F842273D89D5B14D171188A01050063083729"
+    },
+    {
+      "path": "reports/paper_assets/Table_S1_Subgroup_Process_Audit.csv",
+      "bytes": 2131,
+      "sha256": "EE1A94D882CAA88840E9353B5397160C5A02D565576FF0D5B98C06570DC3E0FE"
+    },
+    {
+      "path": "reports/paper_assets/Table_S1_Subgroup_Process_Audit.tex",
+      "bytes": 2872,
+      "sha256": "E9C6C7E7C38FA1FC389AD89A26B55E149D75F8E94D788BF217D955A4B01A8E53"
+    },
+    {
+      "path": "reports/runs/code12_p1_supplementary/metrics/process_pooled_metrics.csv",
+      "bytes": 3485,
+      "sha256": "3DFB9454078A9D83D2EEAEB4B7AE0D36D958DB74FB74B019EC85DA94939A5CD4"
+    },
+    {
+      "path": "reports/runs/code12_p1_supplementary/metrics/process_bootstrap_intervals.csv",
+      "bytes": 599,
+      "sha256": "DF9408463178EF3F4F9C1AF1CC71AC171B78E62815DC70F0A1EBFC190A36DD31"
+    },
+    {
+      "path": "reports/runs/code12_p1_supplementary/metrics/process_temperatures.csv",
+      "bytes": 127,
+      "sha256": "492804F3D6909E41EC54F8F98CBF55ACD11C9B301BC4CF152BE4510743568F75"
+    },
+    {
+      "path": "reports/runs/code12_p1_supplementary/metrics/process_coefficients.csv",
+      "bytes": 2239,
+      "sha256": "FF92D357D772277500E8D8E8A8005B88C472A271BCE241738BF005DFCD85CC04"
+    },
+    {
+      "path": "reports/runs/code12_p1_supplementary/metrics/calibration_bin_intervals.csv",
+      "bytes": 10182,
+      "sha256": "BB7A0A239CE5E088454F504C8A97DDEB8BECD7EC5100A62C0C9D1AB068620B7A"
+    },
+    {
+      "path": "reports/runs/code12_p1_supplementary/metrics/subgroup_metrics.csv",
+      "bytes": 4556,
+      "sha256": "69D22C0F54D0B9DD1792477EE033DB03A67EC67D36B88F52CD414F3A8E6F57A5"
+    },
+    {
+      "path": "reports/runs/code12_p1_supplementary/metrics/subgroup_definitions.json",
+      "bytes": 417,
+      "sha256": "12A3D528D0F2BC8C9E03B74EC6A00E99FE0F6E22F928D3324F000AAF82F00772"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "manifests/code10_formal_run.json",
+      "bytes": 83482,
+      "sha256": "146B26D4385E6F6843F693A3FC1738374FA5A4C0A063223152A3AC837F1812F9"
+    },
+    {
+      "path": "data_cache/prediction_gap_24h/02_dili_labels_censored.parquet",
+      "bytes": 1341482,
+      "sha256": "0C930193EF891A1E0DF3C16B921BCAC3F4CE9608E58028CEC165527D16BD1616"
+    },
+    {
+      "path": "data_cache/prediction_gap_24h/03_dili_dual_stream_tensors.parquet",
+      "bytes": 5618664,
+      "sha256": "DAD06F96EC6AA5CFD8370796AD8F7EF3C3EAFEBB15A25B2451B34F0305480510"
+    },
+    {
+      "path": "data_cache/prediction_gap_24h/03b_diag_tensors.parquet",
+      "bytes": 1330618,
+      "sha256": "C1FC0D5F5B8DEE1DA0AD90281E837A3E8B126A3323BB96B098CBB1C88976BF66"
+    },
+    {
+      "path": "reports/runs/code10_formal_128d4h_seed0/metrics/calibration_bins.csv",
+      "bytes": 16000,
+      "sha256": "59C0BA4087F18C123A8732F615E3EE2318CA0737165B41284F49E4691B16DF79"
+    },
+    {
+      "path": "reports/runs/code10_formal_128d4h_seed0/metrics/dca_curves.csv",
+      "bytes": 27735,
+      "sha256": "DE42B9E9D4641C54DCB800DF5B55F1AB75DFA138FF12CB2720F734F657C79201"
+    }
+  ],
+  "generator_files": [
+    {
+      "path": "src/diliplus/evaluation/p1_supplementary.py",
+      "bytes": 20499,
+      "sha256": "9B62706CE73BE526099C3414A9F12E73CDC01B4B61008684F5F400909D9B4E73"
+    },
+    {
+      "path": "src/diliplus/reporting/p1_contract.py",
+      "bytes": 865,
+      "sha256": "719A2E256473E7B7125C9DB7C3171EBA6060DB5950482023B473471ECF49DCA8"
+    },
+    {
+      "path": "src/diliplus/reporting/figures/supplementary_p1.py",
+      "bytes": 7017,
+      "sha256": "C381B9FF96271F14044755D9DE447F2AE2D0248803FE5DF298DCC6FCB6C57244"
+    },
+    {
+      "path": "src/diliplus/reporting/table_s1.py",
+      "bytes": 5743,
+      "sha256": "BDC3277BBDEC9AFE56A7393373032398295D4C74EA4486E139A2219107768BFB"
+    },
+    {
+      "path": "src/diliplus/reporting/p1_manifest.py",
+      "bytes": 5000,
+      "sha256": "8F505679973FB5450CE1C540B943D17677F170C1FD49FC0867A0EBD69EB71AA1"
+    },
+    {
+      "path": "pipelines/06_build_p1_supplementary.py",
+      "bytes": 2253,
+      "sha256": "4CA940E698FFA1FDFEFFA9B2F8DB31943FABAD742B802CB6ED0F605867453916"
+    }
+  ],
+  "privacy": "tracked outputs are aggregate; row-level process-baseline predictions stay in the run directory",
+  "payload_sha256": "EBCF9E417C9387B888AA695A7EAC6B4B6D40190E6A76CFE24B0B8EBFBBA9B672"
+}

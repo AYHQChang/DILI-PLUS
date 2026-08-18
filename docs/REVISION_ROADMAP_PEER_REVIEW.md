@@ -401,7 +401,7 @@ Track B：
 
 ### P0：不完成就不能相信主要结论
 
-- [ ] P0-01 将研究结局统一为 AHI proxy；决定是否开展临床 DILI adjudication。
+- [x] P0-01 全文与正式代码统一为study-specific biochemical AHI proxy；本稿明确不开展临床DILI adjudication或药物因果归因。
 - [x] P0-02 修复 target-defining lab 进入动态输入，并固定 24h primary prediction gap；真实数据时序审计 PASS（详见第 15 节）。
 - [x] P0-03 修复诊断 encounter/time 边界，或从主模型删除诊断。已采用严格同次住院及 `create_time < prediction_time`，见第 16 节。
 - [x] P0-04 核验 ICU/high-acuity 数据来源。Code-08 已证明是全院住院混合 cohort，不是 ICU-only；论文继续使用 inpatient/hospitalised polypharmacy cohort。
@@ -410,8 +410,8 @@ Track B：
 - [x] P0-07 保存 temperature，并用同一 logits 配对生成 raw/calibrated Figure 3。Code-06 artifact/预测合同已完成；Figure 3 仍待 Code-10 正式 run 重做。
 - [x] P0-08 修复 early-warning cutoff 语义。三模态物理截断、TextCNN mask、对应折 artifact/temperature、availability 与 24/48/72 h patient-cluster 性能均已完成；Figure 4 待按新结果重建。
 - [x] P0-09 成功重跑 Table 1，明确 patients/encounters/setting。确定性正式队列为44,631 encounters / 44,611 patients / 315 positives；论文逐格同步仍待完成。
-- [ ] P0-10 将 Figure 5/6 降级为模型审计，删除剂量、ARR、安全替换和临床建议暗示。
-- [ ] P0-11 唯一正式 run、敏感性、稳定性、消融与 early-warning 已全部生成；替换论文全部旧数值和图表仍待完成。
+- [x] P0-10 旧单病例Figure 5/6及剂量、ARR、安全替换和临床建议暗示已从当前论文资产与主文删除；解释性脚本只保留非因果模型审计语义。
+- [x] P0-11 唯一正式run、敏感性、稳定性、消融、early-warning、Code-11主文表图及Code-12/P1补充审计均已生成并同步论文；全文旧结果已替换。
 - [x] P0-12 删除 `This is TEST.` 并重写 Abstract/Conclusion。首轮论文文字已完成；Code-10 正式数字现已具备，最终逐段同步仍待完成。
 
 ### P1：提交前必须完成
@@ -421,9 +421,9 @@ Track B：
 - [x] P1-03 最低消融6项矩阵、25个新增训练 folds、复用 full primary 和 patient-cluster paired comparison 均已完成。
 - [x] P1-04 正式 manifests 已保存 calibration slope/intercept、O:E、Brier、NLL、QECE、固定阈值/告警预算和完整 DCA；论文表图同步待完成。
 - [x] P1-05 24/48/72 h 的 N/positive/prevalence/三模态可用性、性能 CI 和配对衰减均已完成。
-- [ ] P1-06 增加 cohort-level explainability 稳定性分析，或把单病例明确降为 illustration。
+- [x] P1-06 当前正式主文不再使用单病例attribution/perturbation作为证据；相关脚本降为可选、非因果模型审计，不进入默认paper-assets流水线。
 - [x] P1-07 核验 MedBERT 命名和是否存在预训练。正式名改为 `TimeAwareMultimodalTransformer`/`MultimodalTransformerBaseline`；确认从头训练，旧 MedBERT 名只作 Python 导入兼容。
-- [ ] P1-08 完成 TRIPOD+AI 和 PROBAST+AI 自审。
+- [x] P1-08 完成 TRIPOD+AI 和 PROBAST+AI 内部自审；P1进一步补充校准/DCA、流程强度基线及初始分层审计。它不是低偏倚风险或正式合规认证。
 - [ ] P1-09 系统核验 references.bib。
 
 ### P2：增强项，不应阻塞最小可信论文
@@ -595,6 +595,23 @@ Track B：
 | Code-10 正式性能、校准和统计 | P0-11/P1-04 | 生成唯一正式 OOF 结果，完成 AUROC/AUPRC/Brier/NLL、calibration slope/intercept、配对比较和 DCA | training/evaluation/reporting | Table 2、Figure 2/3 和正文数字全部回溯到同一 run manifest |
 | Code-11 解释与图片清理 | P0-10/P1-06 | 修正 Figure 6 图内标签；病例限定在 outer test；CSV 改用 row index、embedding attenuation、delta predicted probability；增加 cohort-level 稳定性或明确仅作 illustration | `explainability/*.py`、`reporting/figures/attribution.py`、`perturbation.py` | 图题、轴、图例、CSV、日志和正文术语一致；无 patient ID、dose、ARR 或保护/致病效应暗示 |
 | Code-12 正式全流程重跑与论文同步 | Phase 9 | 从冻结数据和配置生成最终表图，更新论文数字并完成投稿前检查 | `pipelines/`、README、paper repo | 单一 run ID；测试和 leakage checks 通过；论文可编译且只提交必要源文件 |
+
+### Code-12/P1 补充审计执行记录（2026-08-18）
+
+P1在不改变Code-10正式六模型排序的前提下完成以下补充工作：
+
+- 十等频风险组校准图及0.5%--5.0%阈值DCA（Figure S1）；
+- 仅使用观察时长、三模态计数/密度和可用性指标的流程强度逻辑回归基线；
+- recorded-sex描述性异质性和observation-window tertile流程审计（Figure S2、Table S1）；
+- 1,000次patient-cluster bootstrap、严格OOF身份核验和aggregate-only manifest；
+- 正文Methods/Results/Discussion/Limitations同步，明确不证明临床获益、公平性、外部适用性或因果关系。
+
+流程基线在44,631 encounters/315 events上的校准后AUPRC为0.0832（95% CI 0.0634--0.1097），
+AUROC为0.8434（0.8213--0.8649），O:E为1.003，top-1%捕获70/315 events。该结果说明观察/测量
+流程本身携带大量排序信息，不能被写成临床特征或新模型优势。完整合同、分层数值、运行命令、图表映射和
+Windows `0xC06D007F`隔离渲染方案见`docs/P1_SUPPLEMENTARY_AUDIT.md`；aggregate证据见
+`manifests/code12_p1_supplementary.json`。最终全量单元测试73/73 PASS；论文16页编译、交叉引用检查和
+Figure S1/S2及Table S1视觉验收均PASS。
 
 ### 14.1 下一步建议
 

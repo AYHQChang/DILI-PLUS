@@ -559,10 +559,10 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 ## 15. 当前建议的大修顺序
 
 1. 已完成目标化验/prediction-time、诊断时间边界、随机性、四方 grouped split、版本化 artifact，以及 Code-07 模型/损失语义合同。
-2. Code-08 cohort/Table 1、Code-09 strict early-warning、Code-10 六模型主运行、128/8敏感性、三 seed 稳定性和最低消融均已完成；下一步按正式 manifests 重建 Table 2 与 Figures 2--4。
+2. Code-08 cohort/Table 1、Code-09 strict early-warning、Code-10 六模型主运行、128/8敏感性、三 seed 稳定性和最低消融均已完成；Code-11 已按正式 manifests 重建 Table 2 与 Figures 1--5，见 `docs/PAPER_ASSETS_CODE11.md`。
 3. 论文后续统一采用 `TimeAwareMultimodalTransformer`/TA-MMT，并只保留当前实现和新实验真正支持的创新点。
-4. 用新结果重做 Table 1、Table 2、Figure 1b/1d/2/3/4。
-5. 把 Figure 5/6 降级为单病例模型审计，并改掉因果/治疗用语。
+4. 新Figure 1--5的主线依次为：prediction-time合同、观察/测量过程、紧凑预测基准、更早截止的信息侵蚀、复杂度审计；写作大纲位于论文仓库 `PAPER_REWRITE_OUTLINE.md`。
+5. Figure 5 已整合消融、架构敏感性、seed稳定性和资源成本；attribution/perturbation只保留为待正式run重算的补充性单病例模型审计，默认流水线不生成。
 6. 最后重写 Abstract、Methods、Results、Discussion 和 Conclusion，使全文只保留代码与证据真正支持的结论。
 
 ## 16. 维护记录
@@ -577,5 +577,9 @@ git -C D:\PaperWorks\DILI-PLUS diff --check
 | 2026-08-17 | `6ef982c` 后继 dirty implementation；待 Code-10 checkpoint | 未修改 | 冻结 Code-10 协议：确定性 earliest-timestamp ALT/AST 全同行规则、真实 source patient_id grouped split、AUPRC 早停、128/4主配置与128/8敏感性、六模型 raw/calibrated 同 logits、扩展指标、patient-cluster bootstrap/配对比较和完整结果 manifest；真实标签聚合审计 PASS（44,631 encounters、315 positives）；尚未正式训练 |
 | 2026-08-17 | 主训练 `22b4b59`；8头 `2b60501`；seed-1 `0d3590f`；seed-2 `8ddd65f` | 未修改 | Code-10 六模型 30/30 folds、128/8 两模型 10/10 folds、primary/TextCNN 三 seed 稳定性均 PASS；正式结果否定旧稿主模型优越性，TextCNN AUPRC 更稳定且 primary 的 Brier/NLL 在3/3 seed更差；aggregate manifests 与本地逐样本/逐折结果已保存，最低消融与 early-warning 性能待运行 |
 | 2026-08-17 | 最低消融 `283302d`；early-warning `61c2153` | 未修改 | 最低消融25 folds及30/30来源artifact审计PASS：medication-only显著优于full primary，移除时间编码无显著损失，移除诊断改善Brier/NLL；24/48/72 h strict early-warning 12/12 OOF与patient-cluster统计PASS，主模型判别显著衰减且更早horizon严重概率高估；至此正式长实验全部完成，论文表图和全文结论待按新证据重建 |
+| 2026-08-17 | Code-11 dirty implementation；manifest `code11_paper_assets.json` | 未修改 | 正式 Table 2 与 Figures 2--5 重建完成；统一固定模型色卡、run-specific读取和输入/输出哈希；最终 recorded run v4 PASS（7.03s）；视觉验收通过；删除10个被替代/冲突的旧本地图片；ML311 PNG渲染 `0xC06D007F` 已定位并改由现有稳定 Anaconda Agg 运行时渲染；未训练、未改统计、未同步论文仓库 |
+| 2026-08-18 | Code-11 dirty implementation；manifest已刷新 | 未修改 | 新建Figure 1并重绘Figures 2--5；统一Times New Roman 14/16号加粗版式与固定色卡；recorded run `code11_formal_paper_assets_times_v2` PASS（12.55s）；旧图累计清理16个；历史Figure 6/7输入不进入正式资产；未训练、未改统计、未同步论文仓库 |
+| 2026-08-18 | Code-11 reframed implementation；manifest v2 | 新增 `PAPER_REWRITE_OUTLINE.md`（未改 `main.tex`） | 按“数据合同→观察过程→紧凑基准→信息侵蚀→复杂度审计”重构主文Figures 2--5；新增Code-08 Table 1哈希校验和资源用量输入；固定模型色卡与Times New Roman 14/16号版式；最终资产run `code11_reframed_paper_assets_v2` PASS（11.54s），全量68/68 tests PASS；删除被替代旧Figure 2--5共8个生成文件；未训练、未重算统计 |
+| 2026-08-18 | Code-12/P1 dirty implementation；manifest `code12_p1_supplementary.json` | P1 Methods/Results/Discussion/Supplementary assets 已同步，待提交 | 新增post-hoc流程强度逻辑回归基线、十等频组校准图、0.5%--5% DCA、recorded-sex与observation-window审计；Figure S1/S2与Table S1已复制并引用；所有CI为1,000次patient-cluster bootstrap；不参与正式模型选择、不建立临床获益或公平性；ML311绘图原生异常`0xC06D007F`通过隔离分析/渲染进程处理；论文16页编译及视觉验收PASS，详见`docs/P1_SUPPLEMENTARY_AUDIT.md` |
 
 以后每次完成会改变论文结论的代码修改，都应在此表增加一行。

@@ -78,7 +78,10 @@ class PipelineTests(unittest.TestCase):
         module = load_pipeline("05_build_paper_assets.py")
         serialized = " ".join(" ".join(stage) for stage in module.STAGES).lower()
         self.assertNotIn("figure_1c", serialized)
+        self.assertNotIn("figure_1b", serialized)
+        self.assertNotIn("figure_1d", serialized)
         self.assertNotIn("mock", serialized)
+        self.assertIn("diliplus.reporting.figures.study_design", serialized)
         self.assertIn("diliplus.reporting.figures.perturbation", serialized)
 
     def test_paper_pipeline_can_build_table1_only(self):

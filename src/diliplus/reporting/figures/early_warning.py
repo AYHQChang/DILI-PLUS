@@ -1,188 +1,221 @@
-"""
-DILI-PLUS | Figure 4：提前预警性能衰减（包实现）
+"""Figure 4: earlier-cutoff information erosion and matched model performance."""
 
-职责：绘制 0、24、48、72 小时时间窗下的 AUPRC、AUROC 轨迹和 72 小时
-性能保持率。
-输入：reports/06a_Early_Warning_Decay_Results.csv。
-输出：figures/Fig_4_Early_Warning_Horizon.png 和 PDF。
-状态：当前时间窗结果制图脚本；结论有效性取决于 06a 遮蔽逻辑的后续修正与复跑。
-"""
+from __future__ import annotations
 
-import os
-import pandas as pd
 import numpy as np
+import matplotlib
+
+matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
-import seaborn as sns
+from matplotlib.lines import Line2D
 
 from diliplus.config import load_settings
+from diliplus.reporting.formal_assets import (
+    DEEP_MODELS,
+    MODEL_COLORS,
+    MODEL_LABELS,
+    configure_publication_style,
+    formal_sources,
+    load_csv,
+    panel_title,
+    read_json,
+    save_figure,
+)
 
-# =============================================================================
-# 🎨 顶刊级审美设定 (沿用马卡龙色卡)
-# =============================================================================
-plt.rcParams.update({
-    'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial', 'Helvetica'],
-    'font.size': 14,
-    'axes.linewidth': 2.0,
-    'xtick.major.width': 2.0,
-    'ytick.major.width': 2.0,
-    'figure.dpi': 300,
-    'axes.edgecolor': '#333333',
-    'text.color': '#222222'
-})
 
-COLOR_PALETTE = {
-    'TimeAwareMultimodalTransformer': '#DF9E9B',
-    'MultimodalTransformerBaseline': '#99BADF',
-    'MultiModalBiLSTM': '#99CDCE',            # BiLSTM: 淡青
-    'MultiModalTextCNN': '#F8BF92',           # CNN: 浅橙
-    'XGBoost': '#999ACD',                     # XGBoost: 淡紫
-    'LogisticRegression': '#FFB3DD'           # LR: 亮粉
+MARKERS = {
+    "MultiModalTextCNN": "o",
+    "MultiModalBiLSTM": "s",
+    "MultimodalTransformerBaseline": "^",
+    "TimeAwareMultimodalTransformer": "D",
 }
-
-LABEL_MAP = {
-    'TimeAwareMultimodalTransformer': 'TA-MMT',
-    'MultimodalTransformerBaseline': 'Multimodal Transformer',
-    'MultiModalBiLSTM': 'BiLSTM',
-    'MultiModalTextCNN': 'TextCNN',
-    'XGBoost': 'XGBoost',
-    'LogisticRegression': 'Logistic Regression'
+MODALITIES = {
+    "Medication": {"prefix": "medication", "color": "#99BADF", "marker": "o"},
+    "Laboratory": {"prefix": "laboratory", "color": "#F8BF92", "marker": "s"},
+    "Diagnosis": {"prefix": "diagnosis", "color": "#99CDCE", "marker": "^"},
 }
+GRID = "#E0E0E0"
 
-# ORDERED_MODELS = [
-#     'LogisticRegression', 'XGBoost', 'MultiModalTextCNN', 
-#     'MultiModalBiLSTM', 'MultimodalTransformerBaseline', 'TimeAwareMultimodalTransformer'
-# ]
 
-ORDERED_MODELS = [
-    'MultiModalBiLSTM', 'MultimodalTransformerBaseline', 'TimeAwareMultimodalTransformer'
-]
+def _load_availability(settings):
+    path = settings.paths.manifests / "code09_early_warning_contract.json"
+    payload = read_json(path)
+    if payload.get("status") != "PASS" or payload.get("contract") != "code09_strict_early_warning_v1":
+        raise ValueError(f"Early-warning availability manifest is not PASS: {path}")
+    rows = sorted(payload.get("horizon_availability", []), key=lambda row: float(row["effective_horizon_hours_before_index"]))
+    horizons = tuple(float(row["effective_horizon_hours_before_index"]) for row in rows)
+    if horizons != (24.0, 48.0, 72.0):
+        raise ValueError("Figure 4 requires complete 24/48/72-hour availability rows")
+    if len({int(row["encounters"]) for row in rows}) != 1:
+        raise ValueError("Figure 4 availability rows must refer to one fixed cohort")
+    return rows
 
-# 安全解析含有置信区间字符串的数据 (如 "0.85 (0.81-0.89)")
-def extract_mean(val):
-    if pd.isna(val): return np.nan
-    if isinstance(val, str) and '(' in val:
-        return float(val.split('(')[0].strip())
-    return float(val)
 
-# =============================================================================
-# 🚀 绘图主引擎
-# =============================================================================
+def _availability_trajectory(ax, rows, value_function, *, letter, title, ylabel, ylim=None, label_mode="all"):
+    horizons = np.array([24.0, 48.0, 72.0])
+    label_offsets = {"Medication": 14, "Laboratory": -18, "Diagnosis": -1}
+    for label, spec in MODALITIES.items():
+        values = np.asarray([value_function(row, spec["prefix"]) for row in rows], dtype=float)
+        ax.plot(
+            horizons,
+            values,
+            color=spec["color"],
+            marker=spec["marker"],
+            linewidth=2.2,
+            markersize=7,
+            label=label,
+        )
+        points = list(zip(horizons, values))
+        if label_mode == "last":
+            points = points[-1:]
+        elif label_mode != "all":
+            raise ValueError(f"Unsupported label mode: {label_mode}")
+        for x, value in points:
+            ax.annotate(
+                f"{value:.1f}",
+                (x, value),
+                xytext=(0, label_offsets[label]),
+                textcoords="offset points",
+                ha="center",
+                fontsize=11.5,
+                fontweight="bold",
+            )
+    ax.set_xticks(horizons, ["24", "48", "72"])
+    ax.set_xlabel("Prediction horizon before index (hours)")
+    ax.set_ylabel(ylabel)
+    if ylim:
+        ax.set_ylim(*ylim)
+    ax.grid(color=GRID, linewidth=0.7)
+    panel_title(ax, letter, title)
+
+
+def _sequence_length_panel(ax, rows):
+    horizons = np.array([24.0, 48.0, 72.0])
+    for label, spec in MODALITIES.items():
+        prefix = spec["prefix"]
+        median = np.asarray([float(row[f"{prefix}_length_median"]) for row in rows])
+        q1 = np.asarray([float(row[f"{prefix}_length_q1"]) for row in rows])
+        q3 = np.asarray([float(row[f"{prefix}_length_q3"]) for row in rows])
+        ax.plot(horizons, median, color=spec["color"], marker=spec["marker"], linewidth=2.2, markersize=7, label=label)
+        ax.fill_between(horizons, q1, q3, color=spec["color"], alpha=0.15, linewidth=0)
+        for x, value in zip(horizons, median):
+            ax.text(x, value + 0.8, f"{value:g}", ha="center", fontsize=11.5, fontweight="bold")
+    ax.set_xticks(horizons, ["24", "48", "72"])
+    ax.set_xlabel("Prediction horizon before index (hours)")
+    ax.set_ylabel("Retained tokens per encounter")
+    ax.set_ylim(bottom=0)
+    ax.grid(color=GRID, linewidth=0.7)
+    panel_title(ax, "C", "Median retained sequence length (IQR band)")
+
+
+def _auprc_panel(ax, bootstrap, prevalence):
+    horizons = np.array([24.0, 48.0, 72.0])
+    for model in DEEP_MODELS:
+        rows = bootstrap[(bootstrap["Model_Architecture"] == model) & (bootstrap["metric"] == "AUPRC")].sort_values(
+            "Effective_Horizon_Hours_Before_Index"
+        )
+        if tuple(rows["Effective_Horizon_Hours_Before_Index"].astype(float)) != tuple(horizons):
+            raise ValueError(f"Incomplete strict early-warning AUPRC trajectory for {model}")
+        estimate = rows["estimate"].astype(float).to_numpy()
+        lower = rows["ci_lower"].astype(float).to_numpy()
+        upper = rows["ci_upper"].astype(float).to_numpy()
+        ax.plot(
+            horizons,
+            estimate,
+            color=MODEL_COLORS[model],
+            marker=MARKERS[model],
+            linewidth=2.0,
+            markersize=6,
+            label=MODEL_LABELS[model],
+        )
+        ax.fill_between(horizons, lower, upper, color=MODEL_COLORS[model], alpha=0.14, linewidth=0)
+    ax.axhline(prevalence, color="#555555", linestyle="--", linewidth=1.0)
+    ax.set_xticks(horizons, ["24", "48", "72"])
+    ax.set_xlabel("Prediction horizon before index (hours)")
+    ax.set_ylabel("AUPRC (95% CI)")
+    ax.set_ylim(bottom=0)
+    ax.grid(color=GRID, linewidth=0.7)
+    panel_title(ax, "D", "Matched earlier-cutoff discrimination")
+    ax.text(
+        0.98,
+        0.96,
+        "Same 24-h checkpoints, temperatures, and test membership; no horizon-specific retraining.",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=11,
+        fontweight="bold",
+        color="#666666",
+    )
+
+
 def generate_early_warning_figure(settings=None):
     settings = settings or load_settings()
-    report_csv = os.path.join(settings.paths.reports, "06a_Early_Warning_Decay_Results.csv")
-    fig_dir = str(settings.paths.figures)
-    os.makedirs(fig_dir, exist_ok=True)
-    
-    if not os.path.exists(report_csv):
-        print(f"🚨 Data not found: {report_csv}")
-        return
-        
-    print("⏳ Loading Early Warning Decay Data...")
-    df = pd.read_csv(report_csv)
-    
-    # 🔥 修复：直接对齐真实的 CSV 列名
-    df['AUPRC_Mean'] = df['AUPRC']
-    df['AUROC_Mean'] = df['AUROC']
-    
-    # 确保窗口时间的正确排序与标签
-    df['Window_Int'] = df['Lead_Time_Hours'].astype(int)
-    df = df.sort_values(by='Window_Int', ascending=True)
-    windows = sorted(df['Window_Int'].unique())
-    x_labels = [f"{w}h" for w in windows]
-    
-    # 获取可用模型并重排
-    available_models = [m for m in ORDERED_MODELS if m in df['Model_Architecture'].unique()]
+    configure_publication_style()
+    availability = _load_availability(settings)
+    sources = formal_sources(settings)
+    bootstrap = load_csv(
+        sources["early_warning_bootstrap"],
+        (
+            "Run_ID",
+            "Probability_Mode",
+            "Model_Architecture",
+            "Effective_Horizon_Hours_Before_Index",
+            "metric",
+            "estimate",
+            "ci_lower",
+            "ci_upper",
+        ),
+    )
+    pooled = load_csv(
+        sources["early_warning_pooled"],
+        ("Run_ID", "Probability_Mode", "Model_Architecture", "Effective_Horizon_Hours_Before_Index", "Prevalence"),
+    )
+    run_id = sources["run_id"]
+    bootstrap = bootstrap[(bootstrap["Run_ID"] == run_id) & (bootstrap["Probability_Mode"] == "calibrated")].copy()
+    pooled = pooled[(pooled["Run_ID"] == run_id) & (pooled["Probability_Mode"] == "calibrated")].copy()
+    if set(bootstrap["Model_Architecture"]) != set(DEEP_MODELS):
+        raise ValueError("Figure 4 requires all four formal deep models")
+    prevalence = float(pooled["Prevalence"].iloc[0])
 
-    # -----------------------------------------------------------------
-    # 🎨 开始绘制 1x3 宽幅主图
-    # -----------------------------------------------------------------
-    print("🎨 Painting Figure 4: The Early Warning Horizon...")
-    fig, axes = plt.subplots(1, 3, figsize=(22, 6.5))
-    ax_prc, ax_roc, ax_bar = axes[0], axes[1], axes[2]
-    
-    # 曲线通用绘制函数
-    def plot_decay_curve(ax, metric_col, title, y_label):
-        for m in available_models:
-            m_data = df[df['Model_Architecture'] == m]
-            if m_data.empty: continue
-            
-            y_vals = m_data[metric_col].values
-            color = COLOR_PALETTE[m]
-            lw = 4.5 if m == 'TimeAwareMultimodalTransformer' else 2.5
-            alpha = 1.0 if m == 'TimeAwareMultimodalTransformer' else 0.8
-            marker = 'o' if m == 'TimeAwareMultimodalTransformer' else 's'
-            markersize = 12 if m == 'TimeAwareMultimodalTransformer' else 8
-            zorder = 10 if m == 'TimeAwareMultimodalTransformer' else 1
-            
-            ax.plot(x_labels, y_vals, marker=marker, color=color, label=LABEL_MAP[m], 
-                    lw=lw, markersize=markersize, alpha=alpha, markeredgecolor='white', markeredgewidth=1.5, zorder=zorder)
-            
-        ax.set_title(title, loc='left', fontweight='bold', fontsize=18, pad=15)
-        ax.set_xlabel('Prediction Horizon (Hours Before DILI Onset)', fontweight='bold')
-        ax.set_ylabel(y_label, fontweight='bold')
-        ax.invert_xaxis() # 翻转 X 轴，使得时间从 72h -> 48h -> 24h -> 0h (符合时间流动直觉)
-        ax.grid(True, linestyle='--', alpha=0.6, zorder=0)
-        sns.despine(ax=ax)
+    base = availability[0]
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12.5), constrained_layout=True)
+    _availability_trajectory(
+        axes[0, 0],
+        availability,
+        lambda row, prefix: 100.0 * float(row[f"{prefix}_events_retained"]) / float(base[f"{prefix}_events_retained"]),
+        letter="A",
+        title="Clinical events retained relative to 24 hours",
+        ylabel="Retained events (%)",
+        ylim=(50, 105),
+        label_mode="last",
+    )
+    _availability_trajectory(
+        axes[0, 1],
+        availability,
+        lambda row, prefix: 100.0 * (1.0 - float(row[f"{prefix}_missing_encounters"]) / float(row["encounters"])),
+        letter="B",
+        title="Encounters retaining each modality",
+        ylabel="Non-empty encounters (%)",
+        ylim=(40, 105),
+    )
+    _sequence_length_panel(axes[1, 0], availability)
+    _auprc_panel(axes[1, 1], bootstrap, prevalence)
 
-    # Panel A & B
-    plot_decay_curve(ax_prc, 'AUPRC_Mean', 'A. AUPRC Trajectory (Robustness)', 'Area Under PR Curve')
-    plot_decay_curve(ax_roc, 'AUROC_Mean', 'B. AUROC Trajectory', 'Area Under ROC Curve')
-    
-    # 🔥 修复 1: 为 A 和 B 添加图内图例 (完美利用左上角的高位留白)
-    ax_prc.legend(loc='center left', frameon=False, fontsize=11)
-    ax_roc.legend(loc='center left', frameon=False, fontsize=11)
+    modality_handles = [
+        Line2D([0], [0], color=spec["color"], marker=spec["marker"], linewidth=2.0, label=label)
+        for label, spec in MODALITIES.items()
+    ]
+    model_handles = [
+        Line2D([0], [0], color=MODEL_COLORS[model], marker=MARKERS[model], linewidth=2.0, label=MODEL_LABELS[model])
+        for model in DEEP_MODELS
+    ]
+    fig.legend(handles=modality_handles, loc="outside lower left", ncol=3, frameon=False)
+    fig.legend(handles=model_handles, loc="outside lower right", ncol=2, frameon=False)
+    png, pdf = save_figure(fig, settings, "Fig_4_Earlier_Cutoff_Information_Erosion")
+    print(f"[PASS] Figure 4: {png} | {pdf}")
+    return png, pdf
 
-
-    # -----------------------------------------------------------------
-    # Panel C: 72h 性能保持率 (Resilience Bar Plot)
-    # -----------------------------------------------------------------
-    retention_rates = []
-    plot_models = []
-    plot_colors = []
-    
-    for m in available_models:
-        m_data = df[df['Model_Architecture'] == m]
-        try:
-            val_0h = m_data[m_data['Window_Int'] == 0]['AUPRC_Mean'].values[0]
-            val_72h = m_data[m_data['Window_Int'] == 72]['AUPRC_Mean'].values[0]
-            retention = (val_72h / val_0h) * 100
-            retention_rates.append(retention)
-            plot_models.append(LABEL_MAP[m])
-            plot_colors.append(COLOR_PALETTE[m])
-        except IndexError:
-            pass # 如果某个模型没有 72h 数据则跳过
-            
-    # 绘制水平柱状图
-    y_pos = np.arange(len(plot_models))
-    bars = ax_bar.barh(y_pos, retention_rates, color=plot_colors, edgecolor='black', height=0.6)
-    
-    # 在柱子尾部添加百分比文本
-    for bar, rate in zip(bars, retention_rates):
-        ax_bar.text(bar.get_width() + 1.0, bar.get_y() + bar.get_height()/2, 
-                    f"{rate:.1f}%", va='center', ha='left', fontweight='bold', fontsize=12)
-    
-    ax_bar.set_yticks(y_pos)
-    ax_bar.set_yticklabels(plot_models, fontweight='bold')
-    ax_bar.set_xlim(0, max(retention_rates) * 1.2) # 留出文本空间
-    ax_bar.set_title('C. AUPRC Retention at 72h Horizon', loc='left', fontweight='bold', fontsize=18, pad=15)
-    ax_bar.set_xlabel('Retention Rate (%) relative to 0h', fontweight='bold')
-    ax_bar.grid(axis='x', linestyle='--', alpha=0.6, zorder=0)
-    sns.despine(ax=ax_bar)
-
-    # -----------------------------------------------------------------
-    # 导出高规图像
-    # -----------------------------------------------------------------
-    plt.tight_layout(pad=1.0, w_pad=0.5)
-    out_path_png = os.path.join(fig_dir, "Fig_4_Early_Warning_Horizon.png")
-    out_path_pdf = os.path.join(fig_dir, "Fig_4_Early_Warning_Horizon.pdf")
-    
-    plt.savefig(out_path_png, dpi=400, bbox_inches='tight', facecolor='white')
-    plt.savefig(out_path_pdf, format='pdf', bbox_inches='tight')
-    plt.close()
-    
-    print(f"\n🎉 完美！Figure 4 早期预警图渲染完毕！(400 DPI)")
-    print(f"👉 查阅路径: {out_path_png}")
 
 if __name__ == "__main__":
     generate_early_warning_figure()

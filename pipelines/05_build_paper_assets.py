@@ -1,4 +1,4 @@
-"""Build Table 1 and the current real-data paper figures."""
+"""Build cohort, formal result, and explanatory paper assets."""
 
 import argparse
 from importlib import import_module
@@ -10,16 +10,21 @@ from diliplus.config import load_settings
 
 STAGES = (
     ("table_1", "diliplus.reporting.table1", "generate_table_1"),
-    ("figure_1b", "diliplus.reporting.figures.data_landscape", "generate_landscape_figure"),
-    ("figure_1d", "diliplus.reporting.figures.biomarker_divergence", "generate_divergence_plot"),
-    ("figure_2", "diliplus.reporting.figures.model_comparison", "generate_advanced_figure_2"),
+    ("table_2", "diliplus.reporting.table2", "generate_table_2"),
+    ("figure_1", "diliplus.reporting.figures.study_design", "generate_study_design_figure"),
+    ("figure_2", "diliplus.reporting.figures.observation_process", "generate_observation_process_figure"),
     ("figure_3", "diliplus.reporting.figures.calibration_impact", "generate_figure_3"),
     ("figure_4", "diliplus.reporting.figures.early_warning", "generate_early_warning_figure"),
-    ("figure_5", "diliplus.reporting.figures.attribution", "generate_waterfall_chart"),
-    ("figure_6", "diliplus.reporting.figures.perturbation", "generate_simulation_figure"),
+    ("figure_5", "diliplus.reporting.figures.robustness", "generate_robustness_figure"),
+    ("figure_6", "diliplus.reporting.figures.attribution", "generate_waterfall_chart"),
+    ("figure_7", "diliplus.reporting.figures.perturbation", "generate_simulation_figure"),
+    ("asset_manifest", "diliplus.reporting.paper_manifest", "generate_paper_asset_manifest"),
+)
+DEFAULT_STAGES = tuple(
+    stage for stage in STAGES if stage[0] not in {"figure_6", "figure_7"}
 )
 
-def run(settings, stages=STAGES):
+def run(settings, stages=DEFAULT_STAGES):
     for stage_name, module_name, function_name in stages:
         print(f"\n[DILI-PLUS] Paper asset stage: {stage_name}")
         getattr(import_module(module_name), function_name)(settings=settings)
@@ -37,7 +42,7 @@ def main(argv=None):
     selected = (
         tuple(stage for stage in STAGES if stage[0] in set(args.stages))
         if args.stages
-        else STAGES
+        else DEFAULT_STAGES
     )
     run(load_settings(args.config), selected)
     return 0

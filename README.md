@@ -44,8 +44,13 @@ patients、315 positives。六模型单 seed/5-fold、128/8 敏感性及 primary
 `manifests/code10_architecture_sensitivity.json` 和 `manifests/code10_seed_stability.json`。
 五个最低消融也已完成并复用主 run 的 full primary，证据见
 `manifests/code10_minimum_ablations_seed0_run.json`。四个深度模型的 24/48/72 h strict
-early-warning 也已完成，证据见 `manifests/code09_early_warning_performance.json`；Table 2 和
-Figures 2--4 尚待重建。旧 checkpoint 和旧性能不得作为修复后结果。
+early-warning 也已完成，证据见 `manifests/code09_early_warning_performance.json`。Code-11
+已按正式 manifests 重建 Table 2 与 Figures 2--5，统一模型色卡、cluster-bootstrap CI、
+告警预算、配对校准、strict early-warning、消融、头数与三-seed稳定性；详见
+[`docs/PAPER_ASSETS_CODE11.md`](docs/PAPER_ASSETS_CODE11.md) 和
+`manifests/code11_paper_assets.json`。P1 校准/DCA、观察流程基线、recorded-sex 与 observation-window
+审计的合同、结果边界和论文映射见 [`docs/P1_SUPPLEMENTARY_AUDIT.md`](docs/P1_SUPPLEMENTARY_AUDIT.md)
+及 `manifests/code12_p1_supplementary.json`。旧 checkpoint、旧性能和已淘汰图片不得作为修复后结果。
 
 需要在 VS Code 中看到完整执行过程时，使用 `Terminal -> Run Task`。当前提供诊断构建、
 Code-00/04 确定性重建、Code-04 pseudo-index 敏感性、Code-05 真实 split 审计、Code-06
@@ -55,6 +60,8 @@ artifact smoke、Code-07 模型/损失语义审计和 recorded unit tests。Code
 ```powershell
 python scripts/run_recorded.py --run-id code08_table1_local -- python pipelines/05_build_paper_assets.py --stages table_1
 python scripts/run_recorded.py --run-id code09_contracts_local -- python scripts/audit_code09_contracts.py
+python scripts/run_recorded.py --run-id code11_formal_paper_assets_local --seed 20260816 -- D:\Anaconda\python.exe pipelines/05_build_paper_assets.py --stages table_2 figure_2 figure_3 figure_4 figure_5 asset_manifest
+python pipelines/06_build_p1_supplementary.py
 ```
 
 这些命令的输出会同步保存为 `reports/run_logs/<run-id>.log`，同名 JSON 记录命令、commit、dirty 状态、

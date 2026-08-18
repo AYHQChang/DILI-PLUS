@@ -297,6 +297,35 @@
         "panel": "shared",
         "clear": true
       }
+    },
+    {
+      "label": "DILI-PLUS: Code-11 reframed Table 2 + Figures 1-5",
+      "type": "process",
+      "command": "D:\\Anaconda\\python.exe",
+      "args": [
+        "${workspaceFolder}\\scripts\\run_recorded.py",
+        "--run-id",
+        "code11_reframed_paper_assets_v2",
+        "--seed",
+        "20260816",
+        "--",
+        "D:\\Anaconda\\python.exe",
+        "${workspaceFolder}\\pipelines\\05_build_paper_assets.py",
+        "--stages",
+        "table_2",
+        "figure_1",
+        "figure_2",
+        "figure_3",
+        "figure_4",
+        "figure_5",
+        "asset_manifest"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
     }
   ]
 }

@@ -25,3 +25,59 @@ __pycache__/
 *.joblib
 *.sqlite
 *.sqlite3
+
+# Private submission materials and local publication/audit staging
+/submission_*/
+/public_release_staging/
+/privacy_audit/
+
+# Additional patient-derived tables, arrays, exports and trained parameters
+*.csv
+*.tsv
+*.jsonl
+*.ndjson
+*.feather
+*.arrow
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.safetensors
+*.onnx
+*.ckpt
+*.db
+*.duckdb.wal
+*.zip
+*.7z
+*.tar
+*.gz
+
+# Secrets and local runtime configuration
+.env
+.env.*
+*.pem
+*.key
+
+# Logs and manuscript compilation products
+*.log
+*.aux
+*.fdb_latexmk
+*.fls
+*.out
+*.spl
+
+# Publication checkout: allow only deliberately reviewed source paths.
+/private_data/
+/configs/local.yaml
+/configs/local.*.yaml
+/manifests/
+/docs/
+/archive/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.xlsx
+*.ipynb

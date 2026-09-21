@@ -16,6 +16,8 @@ from sklearn.metrics import (
 
 
 EPSILON = 1e-7
+# NumPy 1.x exposes the same trapezoidal integration rule as trapz.
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
 CORE_BOOTSTRAP_METRICS = ("AUROC", "AUPRC", "Brier", "NLL")
 
 
@@ -43,7 +45,7 @@ def normalized_partial_auc(y_true, y_prob, fpr_limit: float) -> float:
     inside = fpr < fpr_limit
     fpr_part = np.concatenate([fpr[inside], [fpr_limit]])
     tpr_part = np.concatenate([tpr[inside], [np.interp(fpr_limit, fpr, tpr)]])
-    return float(np.trapezoid(tpr_part, fpr_part) / fpr_limit)
+    return float(_trapezoid(tpr_part, fpr_part) / fpr_limit)
 
 
 def quantile_ece(y_true, y_prob, n_bins: int = 10) -> float:
@@ -252,7 +254,7 @@ def compute_binary_metrics(
     if dca_thresholds is not None:
         curve = decision_curve(y, p, dca_thresholds)
         result["DCA_AUDC"] = float(
-            np.trapezoid(curve["net_benefit_model"], curve["threshold"])
+            _trapezoid(curve["net_benefit_model"], curve["threshold"])
         )
     return result
 

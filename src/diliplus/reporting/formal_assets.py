@@ -22,6 +22,7 @@ import pandas as pd
 FORMAL_MANIFEST = "code10_formal_run.json"
 ABLATION_MANIFEST = "code10_minimum_ablations_seed0_run.json"
 SENSITIVITY_MANIFEST = "code10_sensitivity_128d8h_seed0_run.json"
+P0_STATISTICAL_MANIFEST = "code13_p0_statistical_refinement.json"
 
 FORMAL_MODELS = (
     "LogisticRegression",
@@ -195,6 +196,58 @@ def calibrated_main_frames(settings) -> tuple[pd.DataFrame, pd.DataFrame]:
     if set(pooled["Model_Architecture"]) != set(FORMAL_MODELS) or len(pooled) != len(FORMAL_MODELS):
         raise ValueError("Formal calibrated pooled metrics must contain one row per registered model")
     return pooled, bootstrap
+
+
+def p0_statistical_sources(settings) -> dict[str, Path | str]:
+    """Return hash-verified P0 outputs derived from the frozen formal OOF files."""
+    manifest_path = settings.paths.manifests / P0_STATISTICAL_MANIFEST
+    manifest = read_json(manifest_path)
+    if manifest.get("status") != "COMPLETE":
+        raise ValueError(f"P0 statistical manifest is not COMPLETE: {manifest_path}")
+    if manifest.get("source_run_id") != formal_sources(settings)["run_id"]:
+        raise ValueError("P0 statistical source run differs from the frozen formal run")
+    run_dir = settings.paths.reports / "runs" / str(manifest["run_id"]) / "metrics"
+    paths: dict[str, Path | str] = {
+        "run_id": str(manifest["run_id"]),
+        "source_run_id": str(manifest["source_run_id"]),
+        "manifest": manifest_path,
+        "bootstrap": run_dir / "bootstrap_intervals_10000.csv",
+        "paired": run_dir / "paired_comparisons_10000.csv",
+        "fold_discrimination": run_dir / "fold_discrimination.csv",
+    }
+    recorded = manifest.get("outputs", {})
+    for key in ("bootstrap", "paired", "fold_discrimination"):
+        path = paths[key]
+        assert isinstance(path, Path)
+        expected = recorded.get(path.name, {}).get("sha256")
+        if expected is None or sha256(path) != str(expected).upper():
+            raise ValueError(f"P0 statistical output hash mismatch: {path}")
+    return paths
+
+
+def raw_discrimination_bootstrap(settings) -> pd.DataFrame:
+    sources = p0_statistical_sources(settings)
+    frame = load_csv(
+        sources["bootstrap"],
+        (
+            "Model_Architecture",
+            "Probability_Mode",
+            "metric",
+            "estimate",
+            "ci_lower",
+            "ci_upper",
+            "valid_replicates",
+        ),
+    )
+    result = frame[
+        (frame["Probability_Mode"] == "raw")
+        & frame["metric"].isin(("AUROC", "AUPRC"))
+    ].copy()
+    expected = {(model, metric) for model in FORMAL_MODELS for metric in ("AUROC", "AUPRC")}
+    observed = set(zip(result["Model_Architecture"], result["metric"]))
+    if observed != expected or len(result) != len(expected):
+        raise ValueError("P0 raw discrimination table must contain one row per model/metric")
+    return result
 
 
 def configure_publication_style() -> None:

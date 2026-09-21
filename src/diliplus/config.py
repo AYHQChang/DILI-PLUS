@@ -323,7 +323,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         paths=ProjectPaths.from_mapping(configured_root, raw.get("paths", {})),
         database_path=_resolve(
             configured_root,
-            database.get("path", "D:/MedicalAI_Work/duck/medical.duckdb"),
+            database.get("path", "private_data/medical.duckdb"),
         ),
         database_read_only=True,
         training=TrainingSettings(

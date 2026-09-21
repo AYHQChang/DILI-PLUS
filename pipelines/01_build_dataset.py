@@ -17,7 +17,6 @@ STAGES = (
     ("diagnoses", "diliplus.data.diagnoses", "build_diag_tensors"),
     ("diagnosis_audit", "diliplus.data.diagnosis_audit", "audit_diagnosis_time_contract"),
     ("vocabulary", "diliplus.data.vocabulary", "build_vocabulary"),
-    ("drug_mapping", "diliplus.explainability.ontology", "main"),
 )
 
 def run(settings, stages=STAGES):
